@@ -1,0 +1,879 @@
+<?php
+/**
+ * dashboard.php — X-Connect Multi-Tenant Dashboard
+ * 
+ * Connects to api-server.js REST API to manage engagement batches.
+ * Serve via: npx -y serve . -l 8080 (or any PHP server)
+ * 
+ * Configure API_URL and MASTER_KEY below.
+ */
+
+// ── Config ────────────────────────────────────────────────────
+$API_URL   = 'http://localhost:3000';
+$MASTER_KEY = '068b62857084c3ee4dc12bb0bb41fb93f628c38d99e9db98'; // Set your MASTER_API_KEY here
+
+// ── API Helper ────────────────────────────────────────────────
+function api($method, $endpoint, $data = null, $key = '') {
+    global $API_URL, $MASTER_KEY;
+    $k = $key ?: $MASTER_KEY;
+    $url = rtrim($API_URL, '/') . $endpoint;
+    
+    $opts = [
+        'http' => [
+            'method'  => $method,
+            'header'  => "Content-Type: application/json\r\nAuthorization: Bearer {$k}\r\n",
+            'timeout' => 10,
+            'ignore_errors' => true,
+        ]
+    ];
+    if ($data !== null) {
+        $opts['http']['content'] = json_encode($data);
+    }
+    
+    $ctx = stream_context_create($opts);
+    $raw = @file_get_contents($url, false, $ctx);
+    if ($raw === false) return ['error' => 'API unreachable'];
+    return json_decode($raw, true) ?: ['error' => 'Invalid response'];
+}
+
+// ── Handle Actions ────────────────────────────────────────────
+$msg = '';
+$msgType = '';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+    
+    if ($action === 'start') {
+        $cid = trim($_POST['clientId'] ?? '');
+        $result = api('POST', '/api/sessions/start', [
+            'clientId' => $cid,
+            'mode'     => $_POST['mode'] ?? 'api',
+            'quota'    => (int)($_POST['quota'] ?? 50),
+            'minPause' => (int)($_POST['minPause'] ?? 25),
+            'maxPause' => (int)($_POST['maxPause'] ?? 55),
+            'search'   => $_POST['search'] ?: null,
+            'likeOnly' => isset($_POST['likeOnly']),
+            'dryRun'   => isset($_POST['dryRun']),
+        ]);
+        $msg = $result['message'] ?? ($result['error'] ?? 'Unknown error');
+        $msgType = ($result['ok'] ?? false) ? 'ok' : 'err';
+    }
+    
+    if ($action === 'stop') {
+        $result = api('POST', '/api/sessions/stop', ['clientId' => $_POST['clientId']]);
+        $msg = $result['message'] ?? ($result['error'] ?? 'Unknown error');
+        $msgType = ($result['ok'] ?? false) ? 'ok' : 'err';
+    }
+    
+    if ($action === 'register') {
+        $result = api('POST', '/api/clients/register', [
+            'clientId' => trim($_POST['newClientId'] ?? ''),
+            'name'     => trim($_POST['newClientName'] ?? ''),
+        ]);
+        $msg = ($result['ok'] ?? false)
+            ? "Registered! API Key: {$result['apiKey']}"
+            : ($result['error'] ?? 'Failed');
+        $msgType = ($result['ok'] ?? false) ? 'ok' : 'err';
+    }
+    
+    if ($action === 'credentials') {
+        $cid = trim($_POST['credClientId'] ?? '');
+        $result = api('POST', "/api/clients/{$cid}/credentials", [
+            'consumer_key'        => trim($_POST['consumer_key'] ?? ''),
+            'consumer_secret'     => trim($_POST['consumer_secret'] ?? ''),
+            'access_token'        => trim($_POST['access_token'] ?? ''),
+            'access_token_secret' => trim($_POST['access_token_secret'] ?? ''),
+        ]);
+        $msg = $result['message'] ?? ($result['error'] ?? 'Failed');
+        $msgType = ($result['ok'] ?? false) ? 'ok' : 'err';
+    }
+}
+
+// ── Fetch Data ────────────────────────────────────────────────
+$health  = api('GET', '/api/health');
+$clients = api('GET', '/api/clients');
+$sessions = api('GET', '/api/sessions/list');
+
+$clientList   = $clients['clients'] ?? [];
+$sessionList  = $sessions['sessions'] ?? [];
+$apiOnline    = ($health['status'] ?? '') === 'ok';
+$activeCount  = $health['activeSessions'] ?? 0;
+
+// Selected client logs/stats
+$selClient = $_GET['client'] ?? '';
+$selLogs   = [];
+$selStats  = null;
+if ($selClient) {
+    $logData  = api('GET', "/api/clients/{$selClient}/logs?lines=40");
+    $selLogs  = $logData['lines'] ?? [];
+    $selStats = api('GET', "/api/clients/{$selClient}/stats");
+}
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>X-Connect Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+::selection { background: #090B0F; color: #fff; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg0); }
+::-webkit-scrollbar-thumb { background: var(--bd3); }
+
+:root {
+  --bg0: #ECEEF2; --bg1: #E4E7EC; --bg2: #FFFFFF; --bg3: #F5F6F9;
+  --bd:  rgba(10,12,16,.14); --bd2: rgba(10,12,16,.22); --bd3: rgba(10,12,16,.36);
+  --ink: #090B0F; --ink2: rgba(9,11,15,.88); --ink3: rgba(9,11,15,.65);
+  --ink4: rgba(9,11,15,.42); --ink5: rgba(9,11,15,.18);
+  --green: #0A7A3E; --greenbg: rgba(10,122,62,.08); --greenhl: #0DB85A;
+  --red: #DC2626; --redbg: rgba(220,38,38,.08);
+  --amber: #92400E; --amberbg: rgba(146,64,14,.08);
+  --mono: 'IBM Plex Mono', monospace;
+  --sans: 'IBM Plex Sans', sans-serif;
+  --disp: 'Syne', sans-serif;
+}
+
+@keyframes fadeUp { from { opacity:0; transform:translateY(12px) } to { opacity:1; transform:translateY(0) } }
+@keyframes pulseDot { 0%,100%{opacity:1} 50%{opacity:.3} }
+@keyframes blink { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+
+body {
+  background: var(--bg0); color: var(--ink);
+  font-family: var(--mono); min-height: 100vh;
+}
+
+/* ─── Grid Background ─────────────────────────────────────── */
+.grid-bg {
+  position: fixed; inset: 0; z-index: 0; pointer-events: none;
+  background-image:
+    linear-gradient(var(--bd) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bd) 1px, transparent 1px);
+  background-size: 40px 40px; opacity: .5;
+}
+
+/* ─── Status Bar ───────────────────────────────────────────── */
+.status-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
+  height: 30px; background: var(--ink);
+  border-bottom: 1px solid rgba(255,255,255,.08);
+  display: flex; align-items: center; padding: 0 16px;
+}
+.status-bar .items { display: flex; align-items: center; flex: 1; }
+.status-item {
+  display: flex; align-items: center; gap: 8px;
+  padding: 0 16px; height: 30px;
+  border-right: 1px solid rgba(255,255,255,.1);
+  color: rgba(255,255,255,.55); font-size: 10px; letter-spacing: .1em;
+}
+.status-item:first-child { border-left: 1px solid rgba(255,255,255,.1); }
+.status-val { font-weight: 700; color: rgba(255,255,255,.85); }
+.pulse-dot {
+  width: 5px; height: 5px; border-radius: 50%;
+  display: inline-block; flex-shrink: 0;
+  box-shadow: 0 0 6px rgba(74,222,128,.6);
+}
+.pulse-dot.on  { background: #4ade80; animation: pulseDot 2s infinite; }
+.pulse-dot.off { background: #ef4444; box-shadow: 0 0 6px rgba(239,68,68,.6); animation: none; }
+#clock { font-size: 10px; color: rgba(255,255,255,.35); letter-spacing: .1em; margin-left: auto; }
+
+/* ─── Navbar ───────────────────────────────────────────────── */
+.navbar {
+  position: fixed; top: 30px; left: 0; right: 0; z-index: 100;
+  height: 48px; background: var(--bg2);
+  border-bottom: 2px solid var(--bd3);
+  display: flex; align-items: stretch;
+  box-shadow: 0 2px 12px rgba(10,12,16,.08);
+}
+.brand {
+  display: flex; align-items: center; padding: 0 22px;
+  border-right: 2px solid var(--bd3); gap: 10px;
+}
+.brand-name { font-family: var(--disp); font-size: 16px; font-weight: 800; letter-spacing: .14em; }
+.brand-badge {
+  font-size: 10px; font-weight: 700; color: var(--bg2);
+  letter-spacing: .12em; background: var(--ink); padding: 2px 8px;
+}
+.nav-tabs { display: flex; }
+.nav-tab {
+  display: flex; align-items: center; padding: 0 18px;
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: .1em;
+  text-transform: uppercase; cursor: pointer; text-decoration: none;
+  color: var(--ink4); font-weight: 500;
+  border-right: 1px solid var(--bd);
+  border-bottom: 2px solid transparent;
+  transition: all .15s; position: relative; top: 1px;
+}
+.nav-tab:hover { color: var(--ink2); background: var(--bg3); }
+.nav-tab.active {
+  color: var(--ink); background: var(--bg3);
+  font-weight: 700; border-bottom: 2px solid var(--ink);
+}
+
+/* ─── Content ──────────────────────────────────────────────── */
+.content {
+  position: relative; z-index: 10;
+  margin-top: 78px; padding: 24px;
+  max-width: 1280px; margin-left: auto; margin-right: auto;
+}
+
+/* ─── Toast ────────────────────────────────────────────────── */
+.toast {
+  padding: 12px 18px; margin-bottom: 16px;
+  font-size: 11px; letter-spacing: .06em; font-weight: 600;
+  border-left: 3px solid; animation: fadeUp .3s both;
+}
+.toast.ok  { background: var(--greenbg); border-color: var(--green); color: var(--green); }
+.toast.err { background: var(--redbg); border-color: var(--red); color: var(--red); }
+
+/* ─── Cards ────────────────────────────────────────────────── */
+.card {
+  background: var(--bg2); border: 1px solid var(--bd2);
+  box-shadow: 0 2px 16px rgba(10,12,16,.06);
+  margin-bottom: 16px; animation: fadeUp .4s both;
+}
+.card-head {
+  padding: 11px 20px; border-bottom: 2px solid var(--bd3);
+  display: flex; align-items: center; gap: 12px; background: var(--bg1);
+  flex-wrap: wrap;
+}
+.card-num {
+  font-size: 10px; color: var(--ink4); letter-spacing: .1em; font-weight: 700;
+  border: 1px solid var(--bd2); padding: 2px 8px; background: var(--bg3);
+}
+.card-sep { color: var(--ink5); font-size: 14px; }
+.card-title {
+  font-size: 11px; color: var(--ink); letter-spacing: .1em;
+  text-transform: uppercase; font-weight: 700;
+}
+.card-status { font-size: 9.5px; color: var(--green); margin-left: auto; letter-spacing: .08em; font-weight: 700; }
+.card-body { padding: 24px; }
+
+/* ─── Stats Grid ───────────────────────────────────────────── */
+.stats-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1px; background: var(--bd2); margin-bottom: 16px;
+  animation: fadeUp .4s .1s both;
+}
+.stat-cell {
+  background: var(--bg2); padding: 18px 20px;
+}
+.stat-num {
+  font-family: var(--disp); font-weight: 800;
+  font-size: clamp(28px, 3vw, 42px); line-height: 1; margin-bottom: 4px;
+}
+.stat-num.green { color: var(--green); }
+.stat-label {
+  font-family: var(--mono); font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink4); font-weight: 600;
+}
+
+/* ─── Two Column ───────────────────────────────────────────── */
+.two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+
+/* ─── Form Controls ────────────────────────────────────────── */
+.form-row { display: flex; gap: 10px; align-items: flex-end; margin-bottom: 14px; flex-wrap: wrap; }
+.form-group { display: flex; flex-direction: column; gap: 4px; }
+.form-group label {
+  font-size: 9px; letter-spacing: .14em; text-transform: uppercase;
+  color: var(--ink4); font-weight: 700;
+}
+.form-group input, .form-group select {
+  font-family: var(--mono); font-size: 11px; padding: 9px 12px;
+  background: var(--bg3); border: 1px solid var(--bd2); color: var(--ink);
+  outline: none; transition: border .15s;
+}
+.form-group input:focus, .form-group select:focus { border-color: var(--ink); }
+.form-group input[type="checkbox"] { width: 16px; height: 16px; margin-top: 2px; }
+.check-row {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 10.5px; color: var(--ink3); font-weight: 500;
+  padding-bottom: 4px;
+}
+
+.btn {
+  font-family: var(--mono); font-size: 10px; letter-spacing: .12em;
+  text-transform: uppercase; padding: 10px 20px; cursor: pointer;
+  border: none; font-weight: 700; transition: opacity .15s;
+}
+.btn:hover { opacity: .85; }
+.btn-ink { background: var(--ink); color: var(--bg2); }
+.btn-green { background: var(--green); color: #fff; }
+.btn-red { background: var(--red); color: #fff; }
+.btn-outline { background: transparent; border: 1px solid var(--bd2); color: var(--ink3); }
+.btn-outline:hover { background: var(--bg3); }
+.btn-sm { font-size: 9px; padding: 7px 14px; }
+
+/* ─── Client List ──────────────────────────────────────────── */
+.client-table { width: 100%; border-collapse: collapse; }
+.client-table th {
+  text-align: left; padding: 9px 14px; font-size: 9px; letter-spacing: .14em;
+  text-transform: uppercase; color: var(--ink4); font-weight: 700;
+  background: var(--bg1); border-bottom: 2px solid var(--bd3);
+  border-right: 1px solid var(--bd);
+}
+.client-table th:last-child { border-right: none; }
+.client-table td {
+  padding: 10px 14px; font-size: 11px; border-bottom: 1px solid var(--bd);
+  border-right: 1px solid var(--bd);
+}
+.client-table td:last-child { border-right: none; }
+.client-table tr:hover td { background: var(--bg3); }
+
+/* ─── Status Badges ────────────────────────────────────────── */
+.badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
+  padding: 3px 10px; font-weight: 700;
+}
+.badge-running  { background: var(--greenbg); color: var(--green); border: 1px solid rgba(10,122,62,.25); }
+.badge-stopped  { background: var(--bg1); color: var(--ink4); border: 1px solid var(--bd2); }
+.badge-crashed  { background: var(--redbg); color: var(--red); border: 1px solid rgba(220,38,38,.25); }
+.badge-inactive { background: var(--bg1); color: var(--ink5); border: 1px solid var(--bd); }
+
+/* ─── Terminal ─────────────────────────────────────────────── */
+.term {
+  background: var(--ink); padding: 14px 16px; max-height: 400px;
+  overflow-y: auto; font-size: 10.5px; line-height: 1.8;
+}
+.term-line { color: rgba(255,255,255,.65); }
+.term-line:nth-child(odd) { color: rgba(255,255,255,.5); }
+.term-dots { display: flex; gap: 6px; margin-bottom: 10px; }
+.tdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.term-empty { color: rgba(255,255,255,.2); font-style: italic; }
+.cursor-blink { display: inline-block; width: 7px; height: 14px; background: rgba(255,255,255,.5); animation: blink 1s infinite; vertical-align: middle; margin-left: 4px; }
+
+/* ─── Panels ───────────────────────────────────────────────── */
+.panel-tabs {
+  display: flex; border-bottom: 2px solid var(--bd3);
+  background: var(--bg1); overflow-x: auto;
+}
+.panel-tab {
+  padding: 10px 18px; font-size: 10px; letter-spacing: .1em;
+  text-transform: uppercase; cursor: pointer; font-weight: 500;
+  color: var(--ink4); border-right: 1px solid var(--bd);
+  border-bottom: 2px solid transparent; transition: all .15s;
+  white-space: nowrap; background: none; border-top: none; border-left: none;
+  font-family: var(--mono); position: relative; top: 1px;
+}
+.panel-tab:hover { color: var(--ink2); background: var(--bg3); }
+.panel-tab.active {
+  color: var(--ink); font-weight: 700;
+  border-bottom: 2px solid var(--ink); background: var(--bg2);
+}
+.panel { display: none; padding: 24px; }
+.panel.active { display: block; }
+
+/* ─── Responsive ───────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .two-col, .three-col { grid-template-columns: 1fr; }
+  .stats-grid { grid-template-columns: repeat(2, 1fr); }
+}
+</style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<!-- Status Bar -->
+<div class="status-bar">
+  <div class="items">
+    <div class="status-item">
+      <span class="pulse-dot <?= $apiOnline ? 'on' : 'off' ?>"></span>
+      <span class="status-val" style="color:<?= $apiOnline ? '#4ade80' : '#ef4444' ?>">
+        <?= $apiOnline ? 'API ONLINE' : 'API OFFLINE' ?>
+      </span>
+    </div>
+    <div class="status-item">
+      <span style="color:rgba(255,255,255,.38)">ACTIVE</span>
+      <span class="status-val" style="color:#fff"><?= $activeCount ?></span>
+    </div>
+    <div class="status-item">
+      <span style="color:rgba(255,255,255,.38)">CLIENTS</span>
+      <span class="status-val" style="color:#fff"><?= count($clientList) ?></span>
+    </div>
+    <div class="status-item">
+      <span style="color:rgba(255,255,255,.38)">MAX</span>
+      <span class="status-val" style="color:#fff"><?= $health['maxInstances'] ?? 10 ?></span>
+    </div>
+  </div>
+  <span id="clock"></span>
+</div>
+
+<!-- Navbar -->
+<div class="navbar">
+  <div class="brand">
+    <span class="brand-name">X-CONNECT</span>
+    <span class="brand-badge">DASH</span>
+  </div>
+  <div class="nav-tabs">
+    <a href="?tab=overview" class="nav-tab <?= ($_GET['tab'] ?? 'overview') === 'overview' ? 'active' : '' ?>">Overview</a>
+    <a href="?tab=launch" class="nav-tab <?= ($_GET['tab'] ?? '') === 'launch' ? 'active' : '' ?>">Launch Batch</a>
+    <a href="?tab=clients" class="nav-tab <?= ($_GET['tab'] ?? '') === 'clients' ? 'active' : '' ?>">Clients</a>
+    <a href="?tab=register" class="nav-tab <?= ($_GET['tab'] ?? '') === 'register' ? 'active' : '' ?>">+ Register</a>
+  </div>
+</div>
+
+<!-- Content -->
+<div class="content">
+
+<?php if ($msg): ?>
+  <div class="toast <?= $msgType ?>"><?= htmlspecialchars($msg) ?></div>
+<?php endif; ?>
+
+<?php
+$tab = $_GET['tab'] ?? 'overview';
+
+// ═══════════════════════════════════════════════════════════════
+// OVERVIEW TAB
+// ═══════════════════════════════════════════════════════════════
+if ($tab === 'overview'):
+?>
+
+  <!-- Stats -->
+  <div class="stats-grid">
+    <div class="stat-cell">
+      <div class="stat-num <?= $apiOnline ? 'green' : '' ?>"><?= $apiOnline ? 'ON' : 'OFF' ?></div>
+      <div class="stat-label">API Status</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-num"><?= $activeCount ?></div>
+      <div class="stat-label">Active Sessions</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-num"><?= count($clientList) ?></div>
+      <div class="stat-label">Total Clients</div>
+    </div>
+    <div class="stat-cell">
+      <div class="stat-num"><?= $health['uptime'] ?? 0 ?>s</div>
+      <div class="stat-label">Uptime</div>
+    </div>
+  </div>
+
+  <!-- Active Sessions -->
+  <div class="card">
+    <div class="card-head">
+      <span class="card-num">01</span>
+      <span class="card-sep">/</span>
+      <span class="card-title">Active Sessions</span>
+      <span class="card-status"><?= $activeCount ?> RUNNING</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="client-table">
+        <tr>
+          <th>Client</th>
+          <th>Mode</th>
+          <th>Quota</th>
+          <th>PID</th>
+          <th>Status</th>
+          <th>Started</th>
+          <th>Action</th>
+        </tr>
+        <?php if (empty($sessionList)): ?>
+          <tr><td colspan="7" style="text-align:center;color:var(--ink4);padding:20px">No active sessions</td></tr>
+        <?php else: foreach ($sessionList as $s): ?>
+          <tr>
+            <td style="font-weight:700"><?= htmlspecialchars($s['clientId']) ?></td>
+            <td><?= strtoupper($s['mode'] ?? '-') ?></td>
+            <td><?= $s['quota'] ?? '-' ?></td>
+            <td style="color:var(--ink4)"><?= $s['pid'] ?? '-' ?></td>
+            <td>
+              <?php
+                $st = $s['status'] ?? 'inactive';
+                $bc = 'badge-inactive';
+                if ($st === 'running') $bc = 'badge-running';
+                elseif ($st === 'crashed') $bc = 'badge-crashed';
+                elseif ($st === 'stopped' || $st === 'completed') $bc = 'badge-stopped';
+              ?>
+              <span class="badge <?= $bc ?>"><?= strtoupper($st) ?></span>
+            </td>
+            <td style="font-size:10px;color:var(--ink3)"><?= $s['startedAt'] ?? '-' ?></td>
+            <td>
+              <?php if ($st === 'running'): ?>
+                <form method="POST" style="display:inline">
+                  <input type="hidden" name="action" value="stop">
+                  <input type="hidden" name="clientId" value="<?= htmlspecialchars($s['clientId']) ?>">
+                  <button class="btn btn-red btn-sm" type="submit">Stop</button>
+                </form>
+              <?php endif; ?>
+              <a href="?tab=overview&client=<?= urlencode($s['clientId']) ?>" class="btn btn-outline btn-sm">Logs</a>
+            </td>
+          </tr>
+        <?php endforeach; endif; ?>
+      </table>
+    </div>
+  </div>
+
+  <!-- Client Logs (if selected) -->
+  <?php if ($selClient): ?>
+  <div class="two-col">
+    <div class="card" style="animation-delay:.15s">
+      <div class="card-head">
+        <span class="card-num">02</span>
+        <span class="card-sep">/</span>
+        <span class="card-title">Logs — <?= htmlspecialchars($selClient) ?></span>
+      </div>
+      <div class="card-body" style="padding:0">
+        <div class="term">
+          <div class="term-dots">
+            <span class="tdot" style="background:#ef4444"></span>
+            <span class="tdot" style="background:#fbbf24"></span>
+            <span class="tdot" style="background:#22c55e"></span>
+          </div>
+          <?php if (empty($selLogs)): ?>
+            <div class="term-empty">No logs available<span class="cursor-blink"></span></div>
+          <?php else: foreach ($selLogs as $line): ?>
+            <div class="term-line"><?= htmlspecialchars($line) ?></div>
+          <?php endforeach; endif; ?>
+        </div>
+      </div>
+    </div>
+    <div class="card" style="animation-delay:.25s">
+      <div class="card-head">
+        <span class="card-num">03</span>
+        <span class="card-sep">/</span>
+        <span class="card-title">Stats — <?= htmlspecialchars($selClient) ?></span>
+      </div>
+      <div class="card-body">
+        <?php if ($selStats): $t = $selStats['today'] ?? []; ?>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--bd2);margin-bottom:16px">
+          <div style="background:var(--bg2);padding:14px 16px">
+            <div class="stat-num green" style="font-size:32px"><?= $t['liked'] ?? 0 ?></div>
+            <div class="stat-label">Liked Today</div>
+          </div>
+          <div style="background:var(--bg2);padding:14px 16px">
+            <div class="stat-num" style="font-size:32px"><?= $t['commented'] ?? 0 ?></div>
+            <div class="stat-label">Replied Today</div>
+          </div>
+          <div style="background:var(--bg2);padding:14px 16px">
+            <div class="stat-num" style="font-size:32px"><?= $t['skipped'] ?? 0 ?></div>
+            <div class="stat-label">Skipped</div>
+          </div>
+          <div style="background:var(--bg2);padding:14px 16px">
+            <div class="stat-num" style="font-size:32px;color:var(--red)"><?= $t['errors'] ?? 0 ?></div>
+            <div class="stat-label">Errors</div>
+          </div>
+        </div>
+        <div style="padding:10px 0;border-top:1px solid var(--bd);font-size:11px;color:var(--ink3)">
+          Total all-time replies: <strong style="color:var(--ink)"><?= $selStats['totalReplies'] ?? 0 ?></strong>
+        </div>
+        <?php else: ?>
+          <div style="color:var(--ink4)">No stats available</div>
+        <?php endif; ?>
+      </div>
+    </div>
+  </div>
+  <?php endif; ?>
+
+<?php
+// ═══════════════════════════════════════════════════════════════
+// LAUNCH TAB
+// ═══════════════════════════════════════════════════════════════
+elseif ($tab === 'launch'):
+?>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-num">01</span>
+      <span class="card-sep">/</span>
+      <span class="card-title">Launch Engagement Batch</span>
+      <span class="card-status">CONFIGURE & RUN</span>
+    </div>
+    <div class="card-body">
+      <form method="POST" action="?tab=launch">
+        <input type="hidden" name="action" value="start">
+        
+        <div class="form-row">
+          <div class="form-group">
+            <label>Client ID</label>
+            <select name="clientId" required style="min-width:180px">
+              <option value="">— Select Client —</option>
+              <?php foreach ($clientList as $c): ?>
+                <option value="<?= htmlspecialchars($c['clientId']) ?>"><?= htmlspecialchars($c['clientId']) ?> — <?= htmlspecialchars($c['name'] ?? '') ?></option>
+              <?php endforeach; ?>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Mode</label>
+            <select name="mode" style="min-width:140px">
+              <option value="api">API (Full)</option>
+              <option value="hybrid" selected>Hybrid (Free)</option>
+              <option value="automation">Automation</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Quota</label>
+            <input type="number" name="quota" value="100" min="1" max="500" style="width:80px">
+          </div>
+          <div class="form-group">
+            <label>Min Pause (s)</label>
+            <input type="number" name="minPause" value="25" min="5" max="600" style="width:80px">
+          </div>
+          <div class="form-group">
+            <label>Max Pause (s)</label>
+            <input type="number" name="maxPause" value="55" min="10" max="1200" style="width:80px">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Search Query (optional, API mode)</label>
+            <input type="text" name="search" placeholder="e.g. crypto, bitcoin, AI agents" style="width:100%">
+          </div>
+        </div>
+
+        <div class="form-row" style="gap:20px">
+          <label class="check-row">
+            <input type="checkbox" name="likeOnly"> Like Only (no replies)
+          </label>
+          <label class="check-row">
+            <input type="checkbox" name="dryRun"> Dry Run (preview only)
+          </label>
+        </div>
+
+        <div style="margin-top:10px;display:flex;gap:10px">
+          <button type="submit" class="btn btn-ink">▶ Start Batch</button>
+          <a href="?tab=overview" class="btn btn-outline">← Back to Overview</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Quick Actions for running sessions -->
+  <?php if (!empty($sessionList)): ?>
+  <div class="card" style="animation-delay:.1s">
+    <div class="card-head">
+      <span class="card-num">02</span>
+      <span class="card-sep">/</span>
+      <span class="card-title">Running Sessions</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="client-table">
+        <tr><th>Client</th><th>Mode</th><th>Status</th><th>Action</th></tr>
+        <?php foreach ($sessionList as $s): $st = $s['status'] ?? 'inactive'; ?>
+        <tr>
+          <td style="font-weight:700"><?= htmlspecialchars($s['clientId']) ?></td>
+          <td><?= strtoupper($s['mode'] ?? '-') ?></td>
+          <td><span class="badge badge-<?= $st ?>"><?= strtoupper($st) ?></span></td>
+          <td>
+            <?php if ($st === 'running'): ?>
+            <form method="POST" action="?tab=launch" style="display:inline">
+              <input type="hidden" name="action" value="stop">
+              <input type="hidden" name="clientId" value="<?= htmlspecialchars($s['clientId']) ?>">
+              <button class="btn btn-red btn-sm" type="submit">■ Stop</button>
+            </form>
+            <?php endif; ?>
+          </td>
+        </tr>
+        <?php endforeach; ?>
+      </table>
+    </div>
+  </div>
+  <?php endif; ?>
+
+<?php
+// ═══════════════════════════════════════════════════════════════
+// CLIENTS TAB
+// ═══════════════════════════════════════════════════════════════
+elseif ($tab === 'clients'):
+?>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-num">01</span>
+      <span class="card-sep">/</span>
+      <span class="card-title">Registered Clients</span>
+      <span class="card-status"><?= count($clientList) ?> TOTAL</span>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="client-table">
+        <tr>
+          <th>Client ID</th>
+          <th>Name</th>
+          <th>Credentials</th>
+          <th>Cookies</th>
+          <th>Session</th>
+          <th>Created</th>
+          <th>Actions</th>
+        </tr>
+        <?php if (empty($clientList)): ?>
+          <tr><td colspan="7" style="text-align:center;color:var(--ink4);padding:20px">No clients registered</td></tr>
+        <?php else: foreach ($clientList as $c):
+          $cst = $c['session']['status'] ?? 'inactive';
+          $bc = 'badge-inactive';
+          if ($cst === 'running') $bc = 'badge-running';
+          elseif ($cst === 'crashed') $bc = 'badge-crashed';
+        ?>
+        <tr>
+          <td style="font-weight:700"><?= htmlspecialchars($c['clientId']) ?></td>
+          <td><?= htmlspecialchars($c['name'] ?? '-') ?></td>
+          <td><?= $c['hasCredentials'] ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--red)">✗</span>' ?></td>
+          <td><?= $c['hasCookies'] ? '<span style="color:var(--green)">✓</span>' : '<span style="color:var(--ink4)">—</span>' ?></td>
+          <td><span class="badge <?= $bc ?>"><?= strtoupper($cst) ?></span></td>
+          <td style="font-size:10px;color:var(--ink3)"><?= substr($c['createdAt'] ?? '', 0, 10) ?></td>
+          <td>
+            <a href="?tab=overview&client=<?= urlencode($c['clientId']) ?>" class="btn btn-outline btn-sm">Logs</a>
+            <a href="?tab=creds&client=<?= urlencode($c['clientId']) ?>" class="btn btn-outline btn-sm">Keys</a>
+          </td>
+        </tr>
+        <?php endforeach; endif; ?>
+      </table>
+    </div>
+  </div>
+
+<?php
+// ═══════════════════════════════════════════════════════════════
+// REGISTER TAB
+// ═══════════════════════════════════════════════════════════════
+elseif ($tab === 'register'):
+?>
+
+  <div class="two-col">
+    <div class="card">
+      <div class="card-head">
+        <span class="card-num">01</span>
+        <span class="card-sep">/</span>
+        <span class="card-title">Register New Client</span>
+      </div>
+      <div class="card-body">
+        <form method="POST" action="?tab=register">
+          <input type="hidden" name="action" value="register">
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Client ID</label>
+              <input type="text" name="newClientId" required placeholder="acme-corp" pattern="[a-zA-Z0-9_-]{2,30}">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Display Name</label>
+              <input type="text" name="newClientName" placeholder="Acme Corporation">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-ink">+ Register Client</button>
+        </form>
+      </div>
+    </div>
+
+    <div class="card" style="animation-delay:.1s">
+      <div class="card-head">
+        <span class="card-num">02</span>
+        <span class="card-sep">/</span>
+        <span class="card-title">Upload X API Keys</span>
+      </div>
+      <div class="card-body">
+        <form method="POST" action="?tab=register">
+          <input type="hidden" name="action" value="credentials">
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Client ID</label>
+              <select name="credClientId" required style="width:100%">
+                <option value="">— Select —</option>
+                <?php foreach ($clientList as $c): ?>
+                  <option value="<?= htmlspecialchars($c['clientId']) ?>"><?= htmlspecialchars($c['clientId']) ?></option>
+                <?php endforeach; ?>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Consumer Key</label>
+              <input type="text" name="consumer_key" required style="width:100%">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Consumer Secret</label>
+              <input type="password" name="consumer_secret" required style="width:100%">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Access Token</label>
+              <input type="text" name="access_token" required style="width:100%">
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group" style="flex:1">
+              <label>Access Token Secret</label>
+              <input type="password" name="access_token_secret" required style="width:100%">
+            </div>
+          </div>
+          <button type="submit" class="btn btn-green">Save Credentials</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+<?php
+// ═══════════════════════════════════════════════════════════════
+// CREDENTIALS TAB (per-client)
+// ═══════════════════════════════════════════════════════════════
+elseif ($tab === 'creds'):
+  $credClient = $_GET['client'] ?? '';
+?>
+
+  <div class="card">
+    <div class="card-head">
+      <span class="card-num">01</span>
+      <span class="card-sep">/</span>
+      <span class="card-title">API Keys — <?= htmlspecialchars($credClient) ?></span>
+    </div>
+    <div class="card-body">
+      <form method="POST" action="?tab=creds&client=<?= urlencode($credClient) ?>">
+        <input type="hidden" name="action" value="credentials">
+        <input type="hidden" name="credClientId" value="<?= htmlspecialchars($credClient) ?>">
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Consumer Key</label>
+            <input type="text" name="consumer_key" required style="width:100%">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Consumer Secret</label>
+            <input type="password" name="consumer_secret" required style="width:100%">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="flex:1">
+            <label>Access Token</label>
+            <input type="text" name="access_token" required style="width:100%">
+          </div>
+          <div class="form-group" style="flex:1">
+            <label>Access Token Secret</label>
+            <input type="password" name="access_token_secret" required style="width:100%">
+          </div>
+        </div>
+        <div style="display:flex;gap:10px">
+          <button type="submit" class="btn btn-green">Save Credentials</button>
+          <a href="?tab=clients" class="btn btn-outline">← Back</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+<?php endif; ?>
+
+</div>
+
+<script>
+// Clock
+function updateClock() {
+  const d = new Date();
+  document.getElementById('clock').textContent =
+    d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
+    ' UTC' + (d.getTimezoneOffset() > 0 ? '-' : '+') + String(Math.abs(d.getTimezoneOffset()/60)).padStart(2,'0');
+}
+updateClock();
+setInterval(updateClock, 1000);
+
+// Auto-refresh overview every 15s
+<?php if ($tab === 'overview'): ?>
+setTimeout(() => location.reload(), 15000);
+<?php endif; ?>
+</script>
+
+</body>
+</html>
