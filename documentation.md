@@ -18,19 +18,23 @@
 
 ```
 x-connect/
-├── .env                              # API keys (NVIDIA_API_KEY, NEWS_API_KEY)
+├── .env                              # API keys (NVIDIA_API_KEY, NEWS_API_KEY, MASTER_API_KEY)
 ├── .gitignore
-├── package.json                      # puppeteer-core, twitter-api-v2
+├── package.json                      # puppeteer-core, twitter-api-v2, express, openai, dotenv
 ├── SKILL.md                          # Agent skill manifest
 ├── reply-prompt.md                   # @aptum_ persona & reply rules
 ├── documentation.md                  # ← this file
 │
 ├── scripts/
-│   ├── engage-core.js                # Shared AI pipeline (26 exports)
+│   ├── engage-core.js                # Shared AI pipeline (25 exports)
 │   ├── x-feed-engage.js              # Automation engine (Puppeteer only)
 │   ├── x-api-engage.js               # API + Hybrid engine
 │   ├── x-api-test.js                 # API test utility
 │   ├── news.js                       # NewsAPI enrichment module
+│   ├── api-server.js                 # REST API server (multi-tenant, Express)
+│   ├── instance-manager.js           # Child process manager for multi-client sessions
+│   ├── setup-client.js               # CLI tool to onboard a new client
+│   ├── test-cookies.js               # Cookie validation utility (Puppeteer)
 │   ├── engagement-bait-filter.md     # SKIP/PASS/SHILL classification guide
 │   ├── cookies.json                  # X.com session cookies (Puppeteer)
 │   ├── credentials.json              # X API OAuth credentials
@@ -40,6 +44,9 @@ x-connect/
 │
 ├── clients/                          # Per-client isolated data
 │   └── <client-id>/
+│       ├── config.json               # Client's API key + default settings
+│       ├── credentials.json          # Client's X API OAuth keys
+│       ├── cookies.json              # Client's X session cookies (optional)
 │       ├── engage.log                # Client's activity log
 │       ├── replied.json              # Client's dedup registry
 │       └── feed-progress-*.json      # Client's daily counters
@@ -216,6 +223,77 @@ The `cleanReply()` function strips:
 - Em dashes (→ comma)
 - Model prefixes ("Reply:", "Here's my reply:")
 - Stale year references (2024/2025 → 2026)
+
+---
+
+### 1c. `api-server.js` — REST API Server (Multi-Tenant)
+
+Express server that exposes the engagement engine over HTTP. Enables remote session management, per-client credential upload, and log streaming without SSH access.
+
+#### Usage
+
+```bash
+node scripts/api-server.js              # Default port 3000
+node scripts/api-server.js --port 8080  # Custom port
+```
+
+Requires `MASTER_API_KEY` in `.env`. If unset, a session-only key is generated and printed at startup.
+
+#### Endpoints
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| `POST` | `/api/clients/register` | Master | Register a new client |
+| `POST` | `/api/clients/:id/credentials` | Master or client | Upload X API keys |
+| `POST` | `/api/clients/:id/cookies` | Master or client | Upload session cookies |
+| `POST` | `/api/sessions/start` | Master or client | Start engagement session |
+| `POST` | `/api/sessions/stop` | Master or client | Stop engagement session |
+| `GET` | `/api/sessions/status` | Master or client | Get session status |
+| `GET` | `/api/sessions/list` | Master | List all sessions |
+| `GET` | `/api/clients/:id/logs` | Master or client | Get recent log lines |
+| `GET` | `/api/clients/:id/stats` | Master or client | Get today's engagement stats |
+| `GET` | `/api/clients` | Master | List all registered clients |
+| `GET` | `/api/health` | Public | Health check |
+| `GET` | `/` or `/dashboard` | Public | Serve dashboard.html |
+
+**Auth:** `Authorization: Bearer <api-key>` header required on all non-public endpoints.
+
+---
+
+### 1d. `instance-manager.js` — Child Process Manager
+
+Internal module used by `api-server.js`. Spawns and tracks per-client `x-api-engage.js` (or `x-feed-engage.js`) child processes. Handles stdout/stderr buffering, graceful shutdown, and crash detection.
+
+Not intended to be run directly — required by `api-server.js`.
+
+**Key exports:** `start(clientId, opts)`, `stop(clientId)`, `getStatus(clientId)`, `getRecentOutput(clientId, lines)`, `listAll()`, `stopAll()`
+
+Max concurrent sessions controlled by `MAX_INSTANCES` env var (default: 10).
+
+---
+
+### 1e. `setup-client.js` — Client Onboarding CLI
+
+CLI tool to create a new client directory, generate an API key, and optionally copy credentials — without needing the API server to be running.
+
+```bash
+node scripts/setup-client.js --id acme --name "Acme Corp"
+node scripts/setup-client.js --id acme --name "Acme Corp" --credentials ./keys.json
+```
+
+Creates `clients/<id>/config.json` with a generated API key. Prints the key once — save it, it won't be shown again.
+
+---
+
+### 1f. `test-cookies.js` — Cookie Validation Utility
+
+Quick Puppeteer script to verify that `scripts/cookies.json` produces a valid authenticated X session.
+
+```bash
+node scripts/test-cookies.js
+```
+
+Prints the current URL and whether X login elements were found. Useful for debugging session expiry before running the main engagement scripts.
 
 ---
 

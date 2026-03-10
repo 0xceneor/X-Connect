@@ -1,0 +1,26 @@
+[
+    {
+        "name": "auth_token",
+        "value": "YOUR_X_AUTH_TOKEN",
+        "domain": ".x.com",
+        "path": "/",
+        "httpOnly": true,
+        "secure": true
+    },
+    {
+        "name": "ct0",
+        "value": "YOUR_X_CSRF_TOKEN",
+        "domain": ".x.com",
+        "path": "/",
+        "httpOnly": false,
+        "secure": true
+    },
+    {
+        "name": "twid",
+        "value": "u%3DYOUR_USER_ID",
+        "domain": ".x.com",
+        "path": "/",
+        "httpOnly": false,
+        "secure": true
+    }
+]

@@ -484,11 +484,13 @@ function saveReply(entry) {
 }
 
 function loadReplyPrompt() {
-    const p = path.join(__dirname, 'reply-prompt.md');
+    const p = path.join(__dirname, '..', 'reply-prompt.md');
     try {
         if (fs.existsSync(p)) {
             let content = fs.readFileSync(p, 'utf8');
-            content = content.replace(/^---[\s\S]*?^---\s*/m, '').trim();
+            // Strip YAML frontmatter only if it starts at position 0 (no m flag — ^ = string start)
+            content = content.replace(/^---\n[\s\S]*?\n---\n/, '').trim();
+            // Strip trailing pipeline note (last --- + italic line)
             content = content.replace(/\n---\s*\n\*[^*]+\*\.?\s*$/, '').trim();
             return content;
         }
@@ -498,7 +500,7 @@ function loadReplyPrompt() {
 
 const REPLY_PROMPT_BASE = loadReplyPrompt();
 
-const REPLY_SYSTEM_PROMPT_INLINE = `You are @aptum_ — a web3 builder and AI agent in the trenches. Casually sharp, never trying too hard. Crypto-native energy, zero performative hype. You just launched $A, an AI agent token on Clanker. The community lives at https://aptum.fun/ and the token is live: https://clanker.world/clanker/0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07
+const REPLY_SYSTEM_PROMPT_INLINE = `You are @aptum_ — a web3 builder and AI agent. Casually sharp, never trying too hard. Crypto-native energy, zero performative hype. You built $A, a revenue-generating AI agent token on Base. 100B fixed supply, non-inflationary. Earns across skill sales, games, and social growth services — revenue flows back to holders through buybacks, burns, and airdrops. The community is at https://aptum.fun/ and the token is live on Base: CA 0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07 | chart: https://www.geckoterminal.com/base/pools/0x23e52ed0f63f3663bc5a8b688ac0e1dbafabe928c5a2de552f5f67ac1b33cd4d
 
 CURRENT DATE: ${new Date().toISOString().slice(0, 10)} (the year is 2026 — never reference 2024 or 2025 as the current year)
 
@@ -525,7 +527,7 @@ $A PROMOTION RULES (IMPORTANT):
 - When someone asks "what ticker" / "what to buy" / "shill me" / "which coin" / posts about AI agents or agent tokens, work $A into your reply naturally by casually mentioning it is live and dropping the address.
 - Keep it subtle and organic. You're a builder casually mentioning your live token, not a desperate shill bot.
 - DON'T force $A into every reply. Only when the context fits: ticker discussions, "what are you building", agent/AI talk, memecoin discussions.
-- Good $A mentions: "just launched $A on clanker, agent token szn is here: https://clanker.world/clanker/0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07" / "$A is live. 0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07" / "we're cooking with $A. check the clanker drop"
+- Good $A mentions: "just launched $A on base, agent token that actually earns: geckoterminal.com/base/pools/..." / "$A is live on base. CA: 0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07" / "building $A — AI agent token, revenue goes back to holders. aptum.fun/whitepaper"
 - Bad $A mentions: jamming it into unrelated posts, spamming it, making it the entire reply
 - Maybe 1 in 3-4 crypto/shilling replies should mention $A. Keep it natural. Drop the aptum.fun URL even more sparingly — only when inviting someone specifically.
 
@@ -544,11 +546,11 @@ TONE BY CATEGORY:
 
 GOOD REPLIES — tone/style reference only. NEVER copy these. Every reply must be original:
 - "GM future millionaires" → "gm, still building"
-- "What ticker should I buy?" → "$A when it drops. agent szn is real"
-- "Shill me a memecoin" → "building $A rn, agent tokens are the play"
-- "AI agents are the future" → "been saying this. $A is what we're cooking"
+- "What ticker should I buy?" → "$A on base. agent token that earns: geckoterminal.com/base/pools/..."
+- "Shill me a memecoin" → "$A just dropped on base. 0xaa681b1D3dE076f2524c94Ceb2Db712878Bb6b07"
+- "AI agents are the future" → "been saying this. $A is live"
 - Obvious insider pump → "insidoorssssss"
-- Someone gets rugged → "bruh"
+- Someone gets rugged → say nothing, or a single word of acknowledgment — never mock
 - Follow farming post → "hi"
 - Builder sharing traction → "potential" or 2-3 sentences engaging with what they built
 - Good market analysis → 1-2 sentences adding to their take, "gud tek"
@@ -719,6 +721,7 @@ function extractTweetsFromPage(page, maxAgeMin) {
                     ageMin: Math.round(ageMin),
                     isRetweet: !!isRetweet,
                     isReply: !!isReply,
+                    isAd: !!isAd,
                     alreadyLiked: !!alreadyLiked,
                     imageUrls: imageUrls.slice(0, 4),
                 });
@@ -1090,7 +1093,7 @@ async function replyBackPhase(page, limit) {
         try {
             const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf8'));
             const clean = (Array.isArray(cookies) ? cookies : []).map(c => ({
-                name: c.name, value: c.value, domain: c.domain || '.x.com',
+                name: c.name, value: c.value, url: 'https://x.com',
                 path: c.path || '/', secure: c.secure !== false, httpOnly: c.httpOnly !== false
             })).filter(c => c.name && c.value);
             if (clean.length > 0) await page.setCookie(...clean);
@@ -1101,7 +1104,12 @@ async function replyBackPhase(page, limit) {
     await page.goto(FEED_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => log('WARN', '⚠️ Initial nav timeout, proceeding anyway'));
     await wait(3000);
 
-    const loggedIn = await page.evaluate(() => !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]'));
+    const loggedIn = await page.evaluate(() => {
+        // Return true if 'Home' tab, 'Profile' link or the tweet button exists.
+        return !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]') ||
+            !!document.querySelector('[data-testid="AppTabBar_Profile_Link"]') ||
+            !!document.querySelector('[data-testid="SideNav_NewTweet_Floating_Button"]');
+    });
     if (!loggedIn) {
         log('ERROR', 'Not logged in!');
         await page.screenshot({ path: path.join(DEBUG_DIR, `feed-not-logged-in-${Date.now()}.png`) });
@@ -1145,6 +1153,7 @@ async function replyBackPhase(page, limit) {
 
         const freshTweets = tweets.filter(t => {
             if (seenIds.has(t.id)) return false;
+            if (t.isAd) return false;
             if (t.alreadyLiked && !LIST_URL) return false;
             if (t.isReply) return false;
             if (t.isRetweet && !LIST_URL) return false;
@@ -1403,7 +1412,7 @@ async function replyBackPhase(page, limit) {
                 window.scrollBy(0, stepAmt);
                 await new Promise(r => setTimeout(r, Math.random() * 80 + 30));
             }
-        }, scrollPx);
+        }, scrollPx).catch(() => { /* page navigated mid-scroll — harmless, continue */ });
 
         await randWait(1800, 3500);
 
@@ -1419,7 +1428,7 @@ async function replyBackPhase(page, limit) {
         }
 
         const total = progress.liked + progress.commented;
-        if (total > 0 && total % 10 === 0 && freshTweets.length > 0) {
+        if (total > 0 && total % 30 === 0 && freshTweets.length > 0) {
             const breakMs = Math.floor(Math.random() * 1200000) + 1200000; // 20-40 min break
             log('INFO', `☕ Long break (${Math.round(breakMs / 60000)}min) after ${total} actions to avoid spam detection...`);
             await wait(breakMs);

@@ -18,8 +18,8 @@ const server = http.createServer((req, res) => {
         return;
     }
 
-    // Only allow POST to /api/stats.js target
-    if (req.method === 'POST' && (req.url === '/api/stats.js' || req.url === '/stats.js')) {
+    // Only allow POST to stats endpoints
+    if (req.method === 'POST' && (req.url === '/api/stats' || req.url === '/api/stats.js' || req.url === '/stats.js')) {
         let body = '';
 
         req.on('data', chunk => {

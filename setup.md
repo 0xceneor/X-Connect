@@ -120,10 +120,10 @@ x-connect/
 ```bash
 # From your Windows machine (PowerShell):
 # First, zip it up (exclude node_modules)
-Compress-Archive -Path "C:\Users\admin\Desktop\AgentZero\skills\x-connect\*" -DestinationPath "$env:USERPROFILE\Desktop\x-connect.zip" -Force
+Compress-Archive -Path "C:\path\to\x-connect\*" -DestinationPath "$env:USERPROFILE\Desktop\x-connect.zip" -Force
 
 # Or use tar if you have Git Bash:
-# tar --exclude='node_modules' -czf x-connect.tar.gz -C "C:\Users\admin\Desktop\AgentZero\skills" x-connect
+# tar --exclude='node_modules' -czf x-connect.tar.gz -C "C:\path\to" x-connect
 
 # Upload to VPS
 scp "$env:USERPROFILE\Desktop\x-connect.zip" root@YOUR_VPS_IP:/home/xbot/

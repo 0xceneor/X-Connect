@@ -78,6 +78,10 @@ taskkill /F /IM chrome.exe; taskkill /F /IM node.exe
 | `engage-core.js` | Shared AI pipeline module |
 | `x-api-test.js` | API test utility |
 | `news.js` | NewsAPI enrichment module |
+| `api-server.js` | REST API server for remote/multi-tenant management |
+| `instance-manager.js` | Child process manager (used by api-server) |
+| `setup-client.js` | CLI client onboarding tool |
+| `test-cookies.js` | Cookie session validation utility |
 | `x-analytics-scraper.js` | X analytics scraper |
 | `stats.js` / `stats.php` | Analytics receivers |
 

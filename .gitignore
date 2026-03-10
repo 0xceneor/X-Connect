@@ -1,3 +1,21 @@
+# Environment & secrets
 .env
-node_modules/
+*.env
+
+# X API credentials & session cookies
+scripts/credentials.json
+scripts/cookies.json
+clients/*/credentials.json
+clients/*/cookies.json
+clients/*/config.json
+
+# Client data (logs, progress, per-account state)
 clients/
+
+# Debug / runtime data
+debug/
+*.log
+
+# Dependencies
+node_modules/
+scripts/node_modules/

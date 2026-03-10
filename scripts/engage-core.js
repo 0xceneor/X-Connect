@@ -360,7 +360,7 @@ function cleanReply(text) {
 // ═══════════════════════════════════════════════════════════════════════════
 
 function loadReplyPrompt() {
-    const p = path.join(__dirname, 'reply-prompt.md');
+    const p = path.join(__dirname, '..', 'reply-prompt.md');
     try {
         if (fs.existsSync(p)) {
             let content = fs.readFileSync(p, 'utf8');
