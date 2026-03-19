@@ -19,6 +19,22 @@
 
 ---
 
+## Prerequisites
+
+Before starting, confirm you have:
+
+| # | Requirement | Notes |
+|---|-------------|-------|
+| 1 | **Base wallet private key** | Must hold ≥ $1.00 USDC on Base Mainnet (`eip155:8453`) |
+| 2 | **NVIDIA NIM API key** | Free tier available at https://build.nvidia.com |
+| 3 | **Node.js ≥ 18** | Required for the payment script and the skill module |
+| 4 | **Google Chrome** | Required by Puppeteer for browser automation |
+| 5 | **X.com session cookies** | Export from a logged-in Chrome session — see Step 5 |
+
+Steps 1–4 can be completed autonomously. **Step 5 (cookies) requires a human** to log into X.com in a browser and export the session cookies.
+
+---
+
 ## How to unlock
 
 This skill uses the [x402 payment protocol](https://docs.cdp.coinbase.com/x402/welcome).
@@ -145,14 +161,23 @@ brew install --cask google-chrome
 cp .env.example .env
 ```
 
-Edit `.env` and add your keys:
+Edit `.env` and fill in your values. All variables:
 
 ```env
-NVIDIA_API_KEY=nvapi-...     # Required — LLM + vision calls
-NEWS_API_KEY=...              # Optional — enriches replies with live news
+# Required — LLM + vision calls via NVIDIA NIM
+NVIDIA_API_KEY=nvapi-your-key-here
+
+# Required only if using api-server.js (multi-tenant mode)
+# If omitted, api-server.js generates a random key on each start and prints it to stdout
+MASTER_API_KEY=xc_master_your-secret-key-here
+
+# Optional — enriches replies with live news headlines (https://newsapi.org)
+NEWS_API_KEY=your-newsapi-key-here
 ```
 
-Get a free NVIDIA API key at: https://build.nvidia.com
+- Get a free NVIDIA API key at: https://build.nvidia.com
+- Get a free NewsAPI key at: https://newsapi.org (500 req/day free tier)
+- `MASTER_API_KEY` is only needed if you run `api-server.js` — skip it for single-account use
 
 ---
 
@@ -209,29 +234,81 @@ Returns `{ "valid": true }` if your key is active.
 
 ## Quick reference
 
-All commands run from the `scripts/` directory inside the extracted zip:
+All commands run from the `scripts/` directory inside the extracted zip.
+
+### x-feed-engage.js — all flags
 
 ```bash
 cd x-connect/scripts
 
-# Basic run
+# Basic run (150 quota default)
+node x-feed-engage.js
+
+# Set daily engagement quota
 node x-feed-engage.js --quota 100
 
-# With reply-back (responds to people who replied to you)
-node x-feed-engage.js --quota 100 --reply-back --rb-limit 10
+# Only engage tweets posted within the last N minutes (default: 180)
+node x-feed-engage.js --max-age 60
 
-# Non-headless (visible browser window)
-node x-feed-engage.js --no-headless --quota 100
+# Like only — no AI replies, just likes
+node x-feed-engage.js --like-only
+
+# Reply-back phase — also responds to people who replied to your posts
+node x-feed-engage.js --quota 100 --reply-back --rb-limit 10
 
 # Engage a specific X list instead of home feed
 node x-feed-engage.js --list https://x.com/i/lists/YOUR_LIST_ID --quota 100
 
-# Dry run — no actions taken, just previews what it would do
-node x-feed-engage.js --dry-run --verbose
+# Tune pacing (seconds between actions, default: 25–60)
+node x-feed-engage.js --min-pause 10 --max-pause 30
 
-# Test cookies only — confirms login without running a full batch
+# Non-headless — visible Chrome window (useful for debugging)
+node x-feed-engage.js --no-headless
+
+# Dry run — scrolls and classifies but takes no actions
+node x-feed-engage.js --dry-run
+
+# Resume from today's saved progress file
+node x-feed-engage.js --resume
+
+# Test cookies only — confirms login without running a full session
 node test-cookies.js
 ```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--quota N` | 150 | Daily engagement cap (persists across restarts) |
+| `--max-age N` | 180 | Max tweet age in minutes |
+| `--like-only` | off | Skip reply generation, only like |
+| `--reply-back` | off | Also reply to mentions/replies on your posts |
+| `--rb-limit N` | 20 | Max reply-backs per run |
+| `--list URL` | home feed | Engage an X list instead of home feed |
+| `--min-pause N` | 25 | Min seconds between actions |
+| `--max-pause N` | 60 | Max seconds between actions |
+| `--no-headless` | off | Show Chrome window |
+| `--dry-run` | off | No actions, just preview |
+| `--resume` | on | Resume from today's progress file |
+
+### api-server.js — multi-account REST API
+
+Run this instead of `x-feed-engage.js` if you manage multiple X accounts:
+
+```bash
+node api-server.js
+node api-server.js --port 3000
+```
+
+All endpoints require `Authorization: Bearer <key>`. Use `MASTER_API_KEY` from `.env`.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/api/clients/register` | Register a new X account client |
+| `POST` | `/api/sessions/start` | Start an engagement session |
+| `POST` | `/api/sessions/stop` | Stop a running session |
+| `GET` | `/api/sessions/status` | Get session status |
+| `GET` | `/api/sessions/list` | List all active sessions |
+| `GET` | `/api/clients/:id/logs` | Get recent logs for a client |
+| `GET` | `/api/clients/:id/stats` | Get engagement stats for a client |
 
 ---
 
