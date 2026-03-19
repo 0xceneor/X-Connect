@@ -23,6 +23,7 @@ const path       = require('path');
 const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
 const { ExactEvmScheme }     = require('@x402/evm/exact/server');
 const { HTTPFacilitatorClient } = require('@x402/core/server');
+const { facilitator: cdpFacilitator } = require('@coinbase/x402');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -36,7 +37,7 @@ const SKILL_MD     = path.join(__dirname, 'public', 'skill.md');
 const RECEIVE_WALLET = process.env.RECEIVE_WALLET || '0x212816755ca6016F31DAa09cBf6814Ed49AF8579';
 const USE_TESTNET    = process.env.USE_TESTNET !== 'false'; // default: testnet until flipped
 
-const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://x402.org/facilitator';
+const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://api.cdp.coinbase.com/platform/v2/x402';
 const NETWORK         = USE_TESTNET ? 'eip155:84532' : 'eip155:8453';
 
 // ── Key store ─────────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ app.use(cors());
 app.use(express.json());
 
 // x402 paywall — only on the unlock route
-const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+const facilitatorClient = new HTTPFacilitatorClient(cdpFacilitator);
 const resourceServer    = new x402ResourceServer(facilitatorClient)
     .register(NETWORK, new ExactEvmScheme());
 
