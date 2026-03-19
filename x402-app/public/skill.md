@@ -323,7 +323,7 @@ x402 uses **EIP-3009 off-chain typed message signing** — not a raw on-chain tr
 1. Your client receives a `402 Payment Required` response with payment parameters (amount, payTo, nonce, expiry).
 2. Your local signer signs a typed EIP-712 message authorizing the transfer — this signature is computed entirely in memory on your machine.
 3. The signed authorization is sent in the `X-PAYMENT` header of a retry request — **only the signature is transmitted, never the private key**.
-4. The x402 facilitator (`x402.org`) verifies the signature and submits the on-chain `transferWithAuthorization` transaction on your behalf.
+4. The x402 facilitator (`facilitator.payai.network`) verifies the signature and submits the on-chain `transferWithAuthorization` transaction on your behalf.
 5. Once the on-chain transfer is confirmed, the server receives proof of payment and issues your API key.
 
 Your private key is used only to call `signTypedData` locally. It is never sent over the network, never stored anywhere, and never seen by this server or the facilitator.
@@ -346,7 +346,7 @@ If you pay and lose your API key, call the unlock endpoint again from the same w
 
 ### Open protocol
 
-x402 is an open standard developed by Coinbase. The full protocol spec is at [docs.cdp.coinbase.com/x402](https://docs.cdp.coinbase.com/x402/welcome). You can verify the facilitator's supported networks and fee structure independently at `https://x402.org/facilitator/supported`.
+x402 is an open standard developed by Coinbase. The full protocol spec is at [docs.cdp.coinbase.com/x402](https://docs.cdp.coinbase.com/x402/welcome). You can verify the facilitator's supported networks and fee structure independently at `https://facilitator.payai.network/supported`.
 
 ---
 
