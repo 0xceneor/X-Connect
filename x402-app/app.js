@@ -20,7 +20,9 @@ const cors       = require('cors');
 const crypto     = require('crypto');
 const fs         = require('fs');
 const path       = require('path');
-const { paymentMiddleware } = require('@x402/express');
+const { paymentMiddleware, x402ResourceServer } = require('@x402/express');
+const { ExactEvmScheme }     = require('@x402/evm/exact/server');
+const { HTTPFacilitatorClient } = require('@x402/core/server');
 
 const app  = express();
 const PORT = process.env.PORT || 3001;
@@ -35,6 +37,7 @@ const RECEIVE_WALLET = process.env.RECEIVE_WALLET || '0x212816755ca6016F31DAa09c
 const USE_TESTNET    = process.env.USE_TESTNET !== 'false'; // default: testnet until flipped
 
 const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://x402.org/facilitator';
+const NETWORK         = USE_TESTNET ? 'eip155:84532' : 'eip155:8453';
 
 // ── Key store ─────────────────────────────────────────────────────────────────
 function loadKeys() {
@@ -71,17 +74,26 @@ app.use(cors());
 app.use(express.json());
 
 // x402 paywall — only on the unlock route
+const facilitatorClient = new HTTPFacilitatorClient({ url: FACILITATOR_URL });
+const resourceServer    = new x402ResourceServer(facilitatorClient)
+    .register(NETWORK, new ExactEvmScheme());
+
 app.use(
     paymentMiddleware(
-        RECEIVE_WALLET,
         {
             'GET /x-connect/api/unlock': {
-                price: '$1',
-                network: USE_TESTNET ? 'base-sepolia' : 'base',
+                accepts: [
+                    {
+                        scheme: 'exact',
+                        price:  '$1',
+                        network: NETWORK,
+                        payTo:  RECEIVE_WALLET,
+                    },
+                ],
                 description: 'One-time unlock for the x-connect AI engagement skill ($1 USDC on Base)',
             },
         },
-        { url: FACILITATOR_URL }
+        resourceServer
     )
 );
 
