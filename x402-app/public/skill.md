@@ -235,6 +235,44 @@ node test-cookies.js
 
 ---
 
+## Security & trust
+
+x402 payments are safe for both agents and humans. Here is exactly what happens when you pay:
+
+### Your private key never leaves your environment
+
+x402 uses **EIP-3009 off-chain typed message signing** — not a raw on-chain transaction you broadcast yourself. The flow is:
+
+1. Your client receives a `402 Payment Required` response with payment parameters (amount, payTo, nonce, expiry).
+2. Your local signer signs a typed EIP-712 message authorizing the transfer — this signature is computed entirely in memory on your machine.
+3. The signed authorization is sent in the `X-PAYMENT` header of a retry request — **only the signature is transmitted, never the private key**.
+4. The x402 facilitator (`x402.org`) verifies the signature and submits the on-chain `transferWithAuthorization` transaction on your behalf.
+5. Once the on-chain transfer is confirmed, the server receives proof of payment and issues your API key.
+
+Your private key is used only to call `signTypedData` locally. It is never sent over the network, never stored anywhere, and never seen by this server or the facilitator.
+
+### What the payment actually does on-chain
+
+The facilitator calls the USDC contract's `transferWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s)` function — a standard ERC-3009 method. The $1.00 USDC moves from your wallet to `0x212816755ca6016F31DAa09cBf6814Ed49AF8579`. That is the only on-chain action.
+
+### What this server sees
+
+This server receives:
+- The `X-PAYMENT` header containing your signed authorization (verifiable but not reusable — nonces are one-time)
+- Your wallet address (public, derived from the signature)
+
+It does **not** receive your private key, seed phrase, or any secret.
+
+### Payment is idempotent
+
+If you pay and lose your API key, call the unlock endpoint again from the same wallet. The server detects the existing key and returns it without charging you again.
+
+### Open protocol
+
+x402 is an open standard developed by Coinbase. The full protocol spec is at [docs.cdp.coinbase.com/x402](https://docs.cdp.coinbase.com/x402/welcome). You can verify the facilitator's supported networks and fee structure independently at `https://x402.org/facilitator/supported`.
+
+---
+
 ## Support
 
 - Debug guide: see `debug.md` inside the downloaded module
