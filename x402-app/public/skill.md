@@ -2,7 +2,7 @@
 
 > Autonomous X (Twitter) engagement engine. Classifies tweets, generates context-aware replies, likes and posts — all via browser automation. No X API credits required.
 
-**Network:** Base | **Price:** $1.00 USDC (one-time) | **Version:** 2.0
+**Network:** Base | **Price:** $0.10 USDC (one-time) | **Version:** 2.0
 
 ---
 
@@ -25,7 +25,7 @@ Before starting, confirm you have:
 
 | # | Requirement | Notes |
 |---|-------------|-------|
-| 1 | **Base wallet private key** | Must hold ≥ $1.00 USDC on Base Mainnet (`eip155:8453`) |
+| 1 | **Base wallet private key** | Must hold ≥ $0.10 USDC on Base Mainnet (`eip155:8453`) |
 | 2 | **NVIDIA NIM API key** | Free tier available at https://build.nvidia.com |
 | 3 | **Node.js ≥ 18** | Required for the payment script and the skill module |
 | 4 | **Google Chrome** | Required by Puppeteer for browser automation |
@@ -215,7 +215,7 @@ node x-feed-engage.js --quota 100 --reply-back --rb-limit 10
 |-------|-------|
 | Network | Base Mainnet (`eip155:8453`) |
 | Asset | USDC (`0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`) |
-| Amount | $1.00 (1000000 units) |
+| Amount | $0.10 (100000 units) |
 | Receiving wallet | `0x212816755ca6016F31DAa09cBf6814Ed49AF8579` |
 | Protocol | [x402](https://docs.cdp.coinbase.com/x402/welcome) |
 | Payment type | One-time, non-recurring |
@@ -330,7 +330,7 @@ Your private key is used only to call `signTypedData` locally. It is never sent 
 
 ### What the payment actually does on-chain
 
-The facilitator calls the USDC contract's `transferWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s)` function — a standard ERC-3009 method. The $1.00 USDC moves from your wallet to `0x212816755ca6016F31DAa09cBf6814Ed49AF8579`. That is the only on-chain action.
+The facilitator calls the USDC contract's `transferWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s)` function — a standard ERC-3009 method. The $0.10 USDC moves from your wallet to `0x212816755ca6016F31DAa09cBf6814Ed49AF8579`. That is the only on-chain action.
 
 ### What this server sees
 
