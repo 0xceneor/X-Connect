@@ -6,7 +6,7 @@
  *
  * Endpoints:
  *   GET /x-connect/skill.md          → public skill manifest (agent entry point)
- *   GET /x-connect/api/unlock        → x402 paywall ($1 USDC, Base mainnet)
+ *   GET /x-connect/api/unlock        → x402 paywall ($59 USDC, Base mainnet)
  *   GET /x-connect/api/download      → download x-connect.zip (requires API key)
  *   GET /x-connect/api/verify        → check if a key is valid
  */
@@ -85,12 +85,12 @@ app.use(
                 accepts: [
                     {
                         scheme: 'exact',
-                        price:  '$0.1',
+                        price:  '$59',
                         network: NETWORK,
                         payTo:  RECEIVE_WALLET,
                     },
                 ],
-                description: 'One-time unlock for the x-connect AI engagement skill ($0.10 USDC on Base)',
+                description: 'One-time unlock for the x-connect AI engagement skill ($59 USDC on Base)',
             },
         },
         resourceServer
@@ -166,7 +166,7 @@ app.get('/x-connect/api/download', (req, res) => {
     if (!isValidKey(key)) {
         return res.status(401).json({
             error:   'Invalid or missing API key.',
-            howToGet: 'Send GET /x-connect/api/unlock with $1 USDC on Base to receive your key.',
+            howToGet: 'Send GET /x-connect/api/unlock with $59 USDC on Base to receive your key.',
         });
     }
 
@@ -194,7 +194,7 @@ app.get('/x-connect/api/health', (req, res) => {
     res.json({
         status:    'ok',
         network:   USE_TESTNET ? 'base-sepolia (testnet)' : 'base-mainnet',
-        price:     '$0.10 USDC',
+        price:     '$59 USDC',
         payTo:     RECEIVE_WALLET,
         agents:    Object.keys(loadKeys()).length,
     });
@@ -204,7 +204,7 @@ app.get('/x-connect/api/health', (req, res) => {
 app.listen(PORT, () => {
     console.log(`x402 unlock server running on :${PORT}`);
     console.log(`  Network:    ${USE_TESTNET ? 'Base Sepolia (testnet)' : 'Base Mainnet'}`);
-    console.log(`  Price:      $0.10 USDC`);
+    console.log(`  Price:      $59 USDC`);
     console.log(`  Pay to:     ${RECEIVE_WALLET}`);
     console.log(`  Keys file:  ${KEYS_FILE}`);
     console.log(`  Zip ready:  ${fs.existsSync(PACKAGE_ZIP)}`);

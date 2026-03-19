@@ -1,21 +1,21 @@
-# x-connect — AI Social Engagement Skill
+﻿# x-connect â€” AI Social Engagement Skill
 
-> Autonomous X (Twitter) engagement engine. Classifies tweets, generates context-aware replies, likes and posts — all via browser automation. No X API credits required.
+> Autonomous X (Twitter) engagement engine. Classifies tweets, generates context-aware replies, likes and posts â€” all via browser automation. No X API credits required.
 
-**Network:** Base | **Price:** $0.10 USDC (one-time) | **Version:** 2.0
+**Network:** Base | **Price:** $59 USDC (one-time) | **Version:** 2.0
 
 ---
 
 ## What you get
 
-- **7-stage engagement pipeline** — feed scraping → classification → vision → onchain context (Dune) → reply generation → proofreading → post + verification
-- **AI-powered replies** — context-aware, proofread, persona-consistent
-- **Onchain intelligence** — live Dune Analytics data injected into replies for crypto/DeFi tweets
-- **Anti-detection** — 14 stealth patches, human-paced typing, session warmup, random UA/viewport
-- **Reply-back phase** — automatically responds to replies on your posts
-- **Daily quota management** — persists progress across restarts
-- **Multi-client API server** — manage multiple X accounts via REST API
-- **Full debug guide** — 16-section error reference for VPS deployments
+- **7-stage engagement pipeline** â€” feed scraping â†’ classification â†’ vision â†’ onchain context (Dune) â†’ reply generation â†’ proofreading â†’ post + verification
+- **AI-powered replies** â€” context-aware, proofread, persona-consistent
+- **Onchain intelligence** â€” live Dune Analytics data injected into replies for crypto/DeFi tweets
+- **Anti-detection** â€” 14 stealth patches, human-paced typing, session warmup, random UA/viewport
+- **Reply-back phase** â€” automatically responds to replies on your posts
+- **Daily quota management** â€” persists progress across restarts
+- **Multi-client API server** â€” manage multiple X accounts via REST API
+- **Full debug guide** â€” 16-section error reference for VPS deployments
 
 ---
 
@@ -25,24 +25,24 @@ Before starting, confirm you have:
 
 | # | Requirement | Notes |
 |---|-------------|-------|
-| 1 | **Base wallet private key** | Must hold ≥ $0.10 USDC on Base Mainnet (`eip155:8453`) |
+| 1 | **Base wallet private key** | Must hold â‰¥ $59 USDC on Base Mainnet (`eip155:8453`) |
 | 2 | **NVIDIA NIM API key** | Free tier available at https://build.nvidia.com |
-| 3 | **Node.js ≥ 18** | Required for the payment script and the skill module |
+| 3 | **Node.js â‰¥ 18** | Required for the payment script and the skill module |
 | 4 | **Google Chrome** | Required by Puppeteer for browser automation |
-| 5 | **X.com session cookies** | Export from a logged-in Chrome session — see Step 5 |
+| 5 | **X.com session cookies** | Export from a logged-in Chrome session â€” see Step 5 |
 
-Steps 1–4 can be completed autonomously. **Step 5 (cookies) requires a human** to log into X.com in a browser and export the session cookies.
+Steps 1â€“4 can be completed autonomously. **Step 5 (cookies) requires a human** to log into X.com in a browser and export the session cookies.
 
 ---
 
 ## How to unlock
 
 This skill uses the [x402 payment protocol](https://docs.cdp.coinbase.com/x402/welcome).
-Pay once with your Base wallet — no account, no subscription.
+Pay once with your Base wallet â€” no account, no subscription.
 
-### Step 1 — Pay and unlock
+### Step 1 â€” Pay and unlock
 
-Send a GET request to the unlock endpoint. Your x402-compatible client handles the `402 Payment Required` response automatically, signs the payment on-chain, and retries — returning your API key on success.
+Send a GET request to the unlock endpoint. Your x402-compatible client handles the `402 Payment Required` response automatically, signs the payment on-chain, and retries â€” returning your API key on success.
 
 ```
 GET https://aptum.fun/x-connect/api/unlock
@@ -76,7 +76,7 @@ const payingFetch = wrapFetchWithPaymentFromConfig(fetch, {
 const res = await payingFetch("https://aptum.fun/x-connect/api/unlock");
 const { apiKey, downloadUrl } = await res.json();
 console.log("API Key:", apiKey);
-// Save your apiKey — shown only once
+// Save your apiKey â€” shown only once
 ```
 
 **Python:**
@@ -104,13 +104,13 @@ print("API Key:", api_key)
 
 ---
 
-### Step 2 — Download the module
+### Step 2 â€” Download the module
 
 ```
 GET https://aptum.fun/x-connect/api/download?key=<YOUR_API_KEY>
 ```
 
-Returns `x-connect.zip` — a complete, scrubbed install of the skill. No credentials, no logs, no personal data. `node_modules` is excluded — install them in Step 3.
+Returns `x-connect.zip` â€” a complete, scrubbed install of the skill. No credentials, no logs, no personal data. `node_modules` is excluded â€” install them in Step 3.
 
 ```bash
 unzip x-connect.zip
@@ -119,7 +119,7 @@ cd x-connect
 
 ---
 
-### Step 3 — Install dependencies
+### Step 3 â€” Install dependencies
 
 The zip does not include `node_modules`. Run `npm install` to create them:
 
@@ -150,12 +150,12 @@ sudo apt update && sudo apt install -y google-chrome-stable
 # macOS
 brew install --cask google-chrome
 
-# Windows — download from https://www.google.com/chrome
+# Windows â€” download from https://www.google.com/chrome
 ```
 
 ---
 
-### Step 4 — Configure environment
+### Step 4 â€” Configure environment
 
 ```bash
 cp .env.example .env
@@ -164,26 +164,26 @@ cp .env.example .env
 Edit `.env` and fill in your values. All variables:
 
 ```env
-# Required — LLM + vision calls via NVIDIA NIM
+# Required â€” LLM + vision calls via NVIDIA NIM
 NVIDIA_API_KEY=nvapi-your-key-here
 
 # Required only if using api-server.js (multi-tenant mode)
 # If omitted, api-server.js generates a random key on each start and prints it to stdout
 MASTER_API_KEY=xc_master_your-secret-key-here
 
-# Optional — enriches replies with live news headlines (https://newsapi.org)
+# Optional â€” enriches replies with live news headlines (https://newsapi.org)
 NEWS_API_KEY=your-newsapi-key-here
 ```
 
 - Get a free NVIDIA API key at: https://build.nvidia.com
 - Get a free NewsAPI key at: https://newsapi.org (500 req/day free tier)
-- `MASTER_API_KEY` is only needed if you run `api-server.js` — skip it for single-account use
+- `MASTER_API_KEY` is only needed if you run `api-server.js` â€” skip it for single-account use
 
 ---
 
-### Step 5 — Add your X.com cookies
+### Step 5 â€” Add your X.com cookies
 
-The skill authenticates to X using browser cookies — no X API credits needed.
+The skill authenticates to X using browser cookies â€” no X API credits needed.
 
 1. Open [x.com](https://x.com) in Chrome and log in
 2. Install the **Cookie-Editor** browser extension
@@ -200,7 +200,7 @@ Required cookies (must be present and fresh):
 
 ---
 
-### Step 6 — Run
+### Step 6 â€” Run
 
 ```bash
 cd scripts
@@ -215,7 +215,7 @@ node x-feed-engage.js --quota 100 --reply-back --rb-limit 10
 |-------|-------|
 | Network | Base Mainnet (`eip155:8453`) |
 | Asset | USDC (`0x833589fcd6edb6e08f4c7c32d4f71b54bda02913`) |
-| Amount | $0.10 (100000 units) |
+| Amount | $59 (59000000 units) |
 | Receiving wallet | `0x212816755ca6016F31DAa09cBf6814Ed49AF8579` |
 | Protocol | [x402](https://docs.cdp.coinbase.com/x402/welcome) |
 | Payment type | One-time, non-recurring |
@@ -236,7 +236,7 @@ Returns `{ "valid": true }` if your key is active.
 
 All commands run from the `scripts/` directory inside the extracted zip.
 
-### x-feed-engage.js — all flags
+### x-feed-engage.js â€” all flags
 
 ```bash
 cd x-connect/scripts
@@ -250,28 +250,28 @@ node x-feed-engage.js --quota 100
 # Only engage tweets posted within the last N minutes (default: 180)
 node x-feed-engage.js --max-age 60
 
-# Like only — no AI replies, just likes
+# Like only â€” no AI replies, just likes
 node x-feed-engage.js --like-only
 
-# Reply-back phase — also responds to people who replied to your posts
+# Reply-back phase â€” also responds to people who replied to your posts
 node x-feed-engage.js --quota 100 --reply-back --rb-limit 10
 
 # Engage a specific X list instead of home feed
 node x-feed-engage.js --list https://x.com/i/lists/YOUR_LIST_ID --quota 100
 
-# Tune pacing (seconds between actions, default: 25–60)
+# Tune pacing (seconds between actions, default: 25â€“60)
 node x-feed-engage.js --min-pause 10 --max-pause 30
 
-# Non-headless — visible Chrome window (useful for debugging)
+# Non-headless â€” visible Chrome window (useful for debugging)
 node x-feed-engage.js --no-headless
 
-# Dry run — scrolls and classifies but takes no actions
+# Dry run â€” scrolls and classifies but takes no actions
 node x-feed-engage.js --dry-run
 
 # Resume from today's saved progress file
 node x-feed-engage.js --resume
 
-# Test cookies only — confirms login without running a full session
+# Test cookies only â€” confirms login without running a full session
 node test-cookies.js
 ```
 
@@ -289,7 +289,7 @@ node test-cookies.js
 | `--dry-run` | off | No actions, just preview |
 | `--resume` | on | Resume from today's progress file |
 
-### api-server.js — multi-account REST API
+### api-server.js â€” multi-account REST API
 
 Run this instead of `x-feed-engage.js` if you manage multiple X accounts:
 
@@ -318,11 +318,11 @@ x402 payments are safe for both agents and humans. Here is exactly what happens 
 
 ### Your private key never leaves your environment
 
-x402 uses **EIP-3009 off-chain typed message signing** — not a raw on-chain transaction you broadcast yourself. The flow is:
+x402 uses **EIP-3009 off-chain typed message signing** â€” not a raw on-chain transaction you broadcast yourself. The flow is:
 
 1. Your client receives a `402 Payment Required` response with payment parameters (amount, payTo, nonce, expiry).
-2. Your local signer signs a typed EIP-712 message authorizing the transfer — this signature is computed entirely in memory on your machine.
-3. The signed authorization is sent in the `X-PAYMENT` header of a retry request — **only the signature is transmitted, never the private key**.
+2. Your local signer signs a typed EIP-712 message authorizing the transfer â€” this signature is computed entirely in memory on your machine.
+3. The signed authorization is sent in the `X-PAYMENT` header of a retry request â€” **only the signature is transmitted, never the private key**.
 4. The x402 facilitator (`facilitator.payai.network`) verifies the signature and submits the on-chain `transferWithAuthorization` transaction on your behalf.
 5. Once the on-chain transfer is confirmed, the server receives proof of payment and issues your API key.
 
@@ -330,12 +330,12 @@ Your private key is used only to call `signTypedData` locally. It is never sent 
 
 ### What the payment actually does on-chain
 
-The facilitator calls the USDC contract's `transferWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s)` function — a standard ERC-3009 method. The $0.10 USDC moves from your wallet to `0x212816755ca6016F31DAa09cBf6814Ed49AF8579`. That is the only on-chain action.
+The facilitator calls the USDC contract's `transferWithAuthorization(from, to, value, validAfter, validBefore, nonce, v, r, s)` function â€” a standard ERC-3009 method. The $59 USDC moves from your wallet to `0x212816755ca6016F31DAa09cBf6814Ed49AF8579`. That is the only on-chain action.
 
 ### What this server sees
 
 This server receives:
-- The `X-PAYMENT` header containing your signed authorization (verifiable but not reusable — nonces are one-time)
+- The `X-PAYMENT` header containing your signed authorization (verifiable but not reusable â€” nonces are one-time)
 - Your wallet address (public, derived from the signature)
 
 It does **not** receive your private key, seed phrase, or any secret.

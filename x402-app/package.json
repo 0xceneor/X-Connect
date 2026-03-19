@@ -7,11 +7,15 @@
     "start": "node app.js"
   },
   "dependencies": {
-    "@x402/express": "latest",
+    "@x402/core": "^2.7.0",
+    "@x402/evm": "^2.7.0",
+    "@x402/express": "^2.7.0",
+    "@x402/extensions": "^2.7.0",
     "archiver": "^7.0.1",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
-    "express": "^4.21.2"
+    "express": "^4.21.2",
+    "viem": "^2.0.0"
   },
   "devDependencies": {
     "ssh2": "^1.17.0"
