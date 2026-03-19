@@ -1,0 +1,11 @@
+# x402 Unlock Server — Apache proxy config for cPanel
+# Place this in public_html/x-connect/ on your cPanel host
+# Proxies all /x-connect/* requests to the Node.js app
+
+Options -MultiViews
+RewriteEngine On
+
+# Proxy to Node.js app (Phusion Passenger handles port automatically)
+# If using manual port proxying, replace 3001 with your assigned port
+RewriteCond %{REQUEST_FILENAME} !-f
+RewriteRule ^(.*)$ http://localhost:3001/x-connect/$1 [P,L]

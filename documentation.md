@@ -19,11 +19,29 @@
 ```
 x-connect/
 ├── .env                              # API keys (NVIDIA_API_KEY, NEWS_API_KEY, MASTER_API_KEY)
+├── .env.example                      # Environment variable template
 ├── .gitignore
 ├── package.json                      # puppeteer-core, twitter-api-v2, express, openai, dotenv
+│
+├── ── Documentation ──
+├── README.md                         # Quick-start overview
 ├── SKILL.md                          # Agent skill manifest
+├── documentation.md                  # ← this file — full technical reference
+├── operations.md                     # Step-by-step VPS/local run guide
+├── setup.md                          # First-time setup instructions
+├── debug.md                          # VPS debug guide — 16-section error reference
+├── user-behavior.md                  # User command lookup tables (start/stop/status)
+├── changelog.md                      # Version history and change log
+├── context.md                        # Pitch context — API products, Base integration scope
+├── reply-pipeline.md                 # Reply generation pipeline deep-dive
 ├── reply-prompt.md                   # @aptum_ persona & reply rules
-├── documentation.md                  # ← this file
+├── showcase.md                       # Feature showcase / demo writeup
+├── updatedlog.md                     # Running notes on updates
+│
+├── ── Web Dashboards ──
+├── dashboard.html                    # Static engagement dashboard (served by api-server.js)
+├── dashboard.php                     # PHP dashboard for cPanel/shared hosting deployments
+├── showcase.php                      # PHP showcase page
 │
 ├── scripts/
 │   ├── engage-core.js                # Shared AI pipeline (25 exports)
@@ -35,12 +53,16 @@ x-connect/
 │   ├── instance-manager.js           # Child process manager for multi-client sessions
 │   ├── setup-client.js               # CLI tool to onboard a new client
 │   ├── test-cookies.js               # Cookie validation utility (Puppeteer)
-│   ├── engagement-bait-filter.md     # SKIP/PASS/SHILL classification guide
-│   ├── cookies.json                  # X.com session cookies (Puppeteer)
-│   ├── credentials.json              # X API OAuth credentials
 │   ├── x-analytics-scraper.js        # X analytics page scraper
 │   ├── stats.js                      # Analytics receiver (Node HTTP server)
-│   └── stats.php                     # Analytics receiver (PHP for cPanel)
+│   ├── engagement-bait-filter.md     # SKIP/PASS/SHILL classification guide
+│   ├── cookies.json                  # X.com session cookies (Puppeteer)
+│   ├── cookies.example.json          # Cookie format template
+│   ├── credentials.json              # X API OAuth credentials
+│   └── credentials.example.json      # OAuth credentials template
+│
+├── config/
+│   └── cookies.json                  # Alternate/global cookies config
 │
 ├── clients/                          # Per-client isolated data
 │   └── <client-id>/
@@ -48,7 +70,7 @@ x-connect/
 │       ├── credentials.json          # Client's X API OAuth keys
 │       ├── cookies.json              # Client's X session cookies (optional)
 │       ├── engage.log                # Client's activity log
-│       ├── replied.json              # Client's dedup registry
+│       ├── replied.json              # Client's dedup registry (optional)
 │       └── feed-progress-*.json      # Client's daily counters
 │
 └── debug/                            # Default account data
@@ -84,8 +106,8 @@ node x-feed-engage.js
 node x-feed-engage.js \
   --quota 100 \           # Daily engagement limit (default: 150)
   --max-age 180 \         # Max tweet age in minutes (default: 180)
-  --min-pause 25 \        # Min seconds between actions (default: 420)
-  --max-pause 55 \        # Max seconds between actions (default: 720)
+  --min-pause 25 \        # Min seconds between actions (default: 25)
+  --max-pause 55 \        # Max seconds between actions (default: 60)
   --list URL \            # Engage from an X list instead of home feed
   --reply-back \          # Enable reply-back phase (respond to our notifications)
   --rb-limit 20 \         # Max reply-backs per session
@@ -359,9 +381,11 @@ PORT=8080 node stats.js  # Custom port
 
 ---
 
-### 5. `stats.php` — Analytics Receiver (PHP)
+### 5. `dashboard.html` / `dashboard.php` — Engagement Dashboards
 
-PHP equivalent of `stats.js` for cPanel deployment. Receives analytics POST data and saves to `analytics.json`.
+Two versions of the engagement dashboard:
+- `dashboard.html` — static file served by `api-server.js` at `/` or `/dashboard`
+- `dashboard.php` — PHP equivalent for cPanel/shared hosting deployments without Node
 
 ---
 
@@ -464,7 +488,7 @@ Stored in `.env` at the skill root.
 ```bash
 node x-feed-engage.js --quota 100 --min-pause 25 --max-pause 55 --reply-back --rb-limit 20
 node x-feed-engage.js --list https://x.com/i/lists/YOUR_LIST_ID --quota 100
-node x-feed-engage.js --quota 50 --min-pause 420 --max-pause 720  # stealth
+node x-feed-engage.js --quota 50 --min-pause 120 --max-pause 300  # stealth (slower)
 ```
 
 ### Hybrid (mid-tier)

@@ -67,8 +67,8 @@ const MAX_AGE_MIN = parseInt(getArg('max-age', '180'), 10) || 180;
 const LIKE_ONLY = args.includes('--like-only');
 const DRY_RUN = args.includes('--dry-run');
 const RESUME = !args.includes('--no-resume');
-const MIN_PAUSE = (parseInt(getArg('min-pause', '420'), 10) || 420) * 1000;
-const MAX_PAUSE = (parseInt(getArg('max-pause', '720'), 10) || 720) * 1000;
+const MIN_PAUSE = (parseInt(getArg('min-pause', '25'), 10) || 25) * 1000;
+const MAX_PAUSE = (parseInt(getArg('max-pause', '60'), 10) || 60) * 1000;
 const LIST_URL = getArg('list', null);
 const FEED_URL = LIST_URL || 'https://x.com/home';
 const REPLY_BACK = args.includes('--reply-back');
@@ -132,6 +132,38 @@ function findChrome() {
 
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const randWait = (min, max) => wait(Math.floor(Math.random() * (max - min)) + min);
+
+// ── Anti-detection pools ─────────────────────────────────────────────────
+const USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/132.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.140 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.6723.116 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+];
+const VIEWPORTS = [
+    { width: 1920, height: 1080 },
+    { width: 1440, height: 900 },
+    { width: 1536, height: 864 },
+    { width: 1366, height: 768 },
+    { width: 1280, height: 800 },
+];
+const SESSION_UA = USER_AGENTS[Math.floor(Math.random() * USER_AGENTS.length)];
+const SESSION_VP = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)];
+
+// Simulate human mouse movement to random positions
+async function humanMouseMove(page) {
+    try {
+        const steps = Math.floor(Math.random() * 3) + 2;
+        for (let i = 0; i < steps; i++) {
+            const x = Math.floor(Math.random() * (SESSION_VP.width - 200)) + 100;
+            const y = Math.floor(Math.random() * (SESSION_VP.height - 200)) + 100;
+            await page.mouse.move(x, y, { steps: Math.floor(Math.random() * 10) + 5 });
+            await wait(Math.random() * 200 + 50);
+        }
+    } catch (_) { /* ignore if page navigated */ }
+}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // MODEL PIPELINE — Kimi K2 via OpenAI SDK (streaming to avoid timeouts)
@@ -898,10 +930,11 @@ async function replyBackPhase(page, limit) {
         await page.goto('https://x.com/notifications', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await wait(5000);
 
-        // Scroll a few times to load notifications
+        // Scroll a few times to load notifications — human paced
         for (let scroll = 0; scroll < 5; scroll++) {
-            await page.evaluate(() => window.scrollBy(0, 800));
-            await wait(2000);
+            await humanMouseMove(page);
+            await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 400) + 500));
+            await wait(Math.random() * 1500 + 1500);
         }
 
         // Extract reply notifications (last 12 hours)
@@ -995,28 +1028,44 @@ async function replyBackPhase(page, limit) {
                         await page.keyboard.down('Control');
                         await page.keyboard.press('Enter');
                         await page.keyboard.up('Control');
-                        await wait(1500);
+                        await wait(2000);
 
-                        const stillOpen = await page.evaluate(() => !!document.querySelector('[data-testid="tweetTextarea_0"]'));
-                        if (stillOpen) {
-                            try { await page.click('[data-testid="tweetButtonInline"]'); await wait(2000); } catch (_) { /* */ }
+                        // Check success: textarea closed (modal) OR toast appeared (inline) OR textarea emptied
+                        const checkSubmittedRB = () => page.evaluate(() => {
+                            if (!document.querySelector('[data-testid="tweetTextarea_0"]')) return true;
+                            const toast = document.querySelector('[data-testid="toast"]');
+                            if (toast && toast.textContent.toLowerCase().includes('sent')) return true;
+                            const ta = document.querySelector('[data-testid="tweetTextarea_0"]');
+                            if (ta && (ta.textContent || '').trim() === '') return true;
+                            return false;
+                        }).catch(() => false);
+
+                        let submitted = await checkSubmittedRB();
+                        if (!submitted) {
+                            try { await page.click('[data-testid="tweetButtonInline"]'); await wait(2500); } catch (_) { /* */ }
+                            submitted = await checkSubmittedRB();
                         }
 
-                        replied++;
-                        log('INFO', `  💬 Reply-back: "${reply}"`);
+                        if (submitted) {
+                            replied++;
+                            log('INFO', `  ✅ Reply-back confirmed: "${reply.substring(0, 80)}"`);
 
-                        // Save to replied.json too
-                        saveReply({
-                            tweetId: notif.id,
-                            tweetAuthor: notif.author,
-                            tweetText: notif.text,
-                            tweetAge: notif.ageMin,
-                            reply,
-                            replyLength: reply.length,
-                            filterSignal: 'REPLY_BACK',
-                            timestamp: new Date().toISOString(),
-                            model: NVIDIA_MODEL,
-                        });
+                            saveReply({
+                                tweetId: notif.id,
+                                tweetAuthor: notif.author,
+                                tweetText: notif.text,
+                                tweetAge: notif.ageMin,
+                                reply,
+                                replyLength: reply.length,
+                                filterSignal: 'REPLY_BACK',
+                                timestamp: new Date().toISOString(),
+                                model: NVIDIA_MODEL,
+                            });
+                        } else {
+                            log('WARN', `  ❌ Reply-back FAILED to post on ${notif.id} — textarea still open`);
+                            await page.screenshot({ path: require('path').join(require('path').join(__dirname, '..', 'debug'), `replyback-fail-${Date.now()}.png`) }).catch(() => {});
+                            try { await page.keyboard.press('Escape'); await wait(500); } catch (_) {}
+                        }
                     } else {
                         log('WARN', `  ⚠️  Reply box didn't open`);
                     }
@@ -1069,55 +1118,250 @@ async function replyBackPhase(page, limit) {
     }
     console.log('');
 
+    // Clean up stale Chrome lock files before launch
+    ['DevToolsActivePort', 'SingletonLock', 'SingletonSocket', 'SingletonCookie'].forEach(f => {
+        try { require('fs').unlinkSync(path.join(USER_DATA_DIR, f)); } catch (_) {}
+    });
+
     const browser = await puppeteer.launch({
         executablePath: CHROME_PATH,
         userDataDir: USER_DATA_DIR,
-        headless: process.argv.includes('--no-headless') ? false : 'new',
-        defaultViewport: null,
+        headless: process.argv.includes('--no-headless') ? false : true,
+        defaultViewport: { width: SESSION_VP.width, height: SESSION_VP.height },
         ignoreDefaultArgs: ['--enable-automation'],
         args: [
-            '--start-maximized',
+            `--window-size=${SESSION_VP.width},${SESSION_VP.height}`,
             '--disable-infobars',
             '--disable-gpu',
+            '--no-first-run',
+            '--no-default-browser-check',
+            '--disable-popup-blocking',
+            '--disable-translate',
+            '--disable-background-timer-throttling',
+            '--disable-backgrounding-occluded-windows',
+            '--disable-renderer-backgrounding',
+            '--lang=en-US,en',
+            '--disable-dev-shm-usage',
+            // Linux VPS requirements
+            ...(process.platform === 'linux' ? [
+                '--no-sandbox',
+                '--disable-setuid-sandbox',
+                '--password-store=basic',
+                '--single-process',
+            ] : []),
         ]
     });
 
     const page = (await browser.pages())[0];
-    // Remove automation traces
+
+    // ── Comprehensive stealth patches ────────────────────────────────────
     await page.evaluateOnNewDocument(() => {
+        // 1. Remove webdriver flag
         Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+
+        // 2. Add chrome object (real Chrome has this)
+        window.chrome = { runtime: {}, loadTimes: () => {}, csi: () => {}, app: {} };
+
+        // 3. Realistic plugins array
+        Object.defineProperty(navigator, 'plugins', {
+            get: () => {
+                const arr = [
+                    { name: 'Chrome PDF Plugin', filename: 'internal-pdf-viewer', description: 'Portable Document Format' },
+                    { name: 'Chrome PDF Viewer', filename: 'mhjfbmdgcfjbbpaeojofohoefgiehjai', description: '' },
+                    { name: 'Native Client', filename: 'internal-nacl-plugin', description: '' },
+                ];
+                arr.__proto__ = PluginArray.prototype;
+                return arr;
+            }
+        });
+
+        // 4. Languages
+        Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+
+        // 5. Platform
+        Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
+
+        // 6. Hardware fingerprint values
+        Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => 8 });
+        Object.defineProperty(navigator, 'deviceMemory', { get: () => 8 });
+
+        // 7. Notification permission
+        if (window.Notification) {
+            try { Object.defineProperty(Notification, 'permission', { get: () => 'default' }); } catch (_) {}
+        }
+
+        // 8. Navigator permissions — hide automation detection
+        if (navigator.permissions) {
+            const origQuery = navigator.permissions.query.bind(navigator.permissions);
+            navigator.permissions.query = (params) => {
+                if (params.name === 'notifications') return Promise.resolve({ state: 'default' });
+                if (params.name === 'clipboard-read') return Promise.resolve({ state: 'prompt' });
+                if (params.name === 'clipboard-write') return Promise.resolve({ state: 'granted' });
+                return origQuery(params);
+            };
+        }
+
+        // 9. WebGL vendor/renderer spoofing
+        try {
+            const getParam = WebGLRenderingContext.prototype.getParameter;
+            WebGLRenderingContext.prototype.getParameter = function(parameter) {
+                if (parameter === 37445) return 'Intel Inc.';
+                if (parameter === 37446) return 'Intel(R) Iris(TM) Plus Graphics 640';
+                return getParam.call(this, parameter);
+            };
+        } catch (_) {}
+
+        // 10. Remove selenium/webdriver global artifacts
+        const artifactsToDelete = [
+            '__webdriver_evaluate', '__selenium_evaluate', '__webdriver_script_func',
+            '__webdriver_script_fn', '__fxdriver_evaluate', '__driver_unwrapped',
+            '__webdriverFunc', '__driver_evaluate', '__selenium_unwrapped',
+            '__firebug_html_panel', 'callSelenium', '_Selenium_IDE_Recorder',
+            '__selenium_vars', '__webdriver_unwrapped',
+        ];
+        for (const key of artifactsToDelete) { try { delete window[key]; } catch (_) {} }
+
+        // 11. Canvas fingerprint — subtle pixel noise so the fingerprint hash differs each session
+        try {
+            const origToDataURL = HTMLCanvasElement.prototype.toDataURL;
+            HTMLCanvasElement.prototype.toDataURL = function(type, ...args) {
+                if (this.width > 0 && this.height > 0) {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        const img = ctx.getImageData(0, 0, 1, 1);
+                        img.data[0] = img.data[0] ^ 1;
+                        ctx.putImageData(img, 0, 0);
+                    }
+                }
+                return origToDataURL.call(this, type, ...args);
+            };
+        } catch (_) {}
+
+        // 12. outerHeight/outerWidth match real browser dimensions
+        try {
+            Object.defineProperty(window, 'outerWidth', { get: () => window.innerWidth });
+            Object.defineProperty(window, 'outerHeight', { get: () => window.innerHeight + 74 });
+        } catch (_) {}
+
+        // 13. Connection info — real Chrome reports these
+        if (navigator.connection) {
+            try {
+                Object.defineProperty(navigator.connection, 'rtt', { get: () => 100 });
+                Object.defineProperty(navigator.connection, 'downlink', { get: () => 10 });
+            } catch (_) {}
+        }
+
+        // 14. Max touch points — desktop Chrome reports 0
+        Object.defineProperty(navigator, 'maxTouchPoints', { get: () => 0 });
     });
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36');
+
+    await page.setUserAgent(SESSION_UA);
+    log('INFO', `Session UA: ${SESSION_UA.match(/Chrome\/([\d.]+)/)?.[0] || 'Chrome'} | Viewport: ${SESSION_VP.width}x${SESSION_VP.height}`);
 
     if (fs.existsSync(COOKIES_PATH)) {
         try {
             const cookies = JSON.parse(fs.readFileSync(COOKIES_PATH, 'utf8'));
-            const clean = (Array.isArray(cookies) ? cookies : []).map(c => ({
-                name: c.name, value: c.value, url: 'https://x.com',
-                path: c.path || '/', secure: c.secure !== false, httpOnly: c.httpOnly !== false
-            })).filter(c => c.name && c.value);
-            if (clean.length > 0) await page.setCookie(...clean);
-        } catch (_) { /* ignore */ }
+            const sameSiteMap = { 'no_restriction': 'None', 'lax': 'Lax', 'strict': 'Strict' };
+            const clean = (Array.isArray(cookies) ? cookies : []).map(c => {
+                const mapped = {
+                    name: c.name,
+                    value: c.value,
+                    domain: c.domain || '.x.com',
+                    path: c.path || '/',
+                    secure: c.secure !== false,
+                    httpOnly: c.httpOnly === true,
+                };
+                const ss = sameSiteMap[(c.sameSite || '').toLowerCase()];
+                if (ss) mapped.sameSite = ss;
+                if (c.expirationDate) mapped.expires = c.expirationDate;
+                return mapped;
+            }).filter(c => c.name && c.value);
+            if (clean.length > 0) {
+                // Clear any stale cookies first to prevent logging into the wrong account
+                const client = await page.createCDPSession();
+                await client.send('Network.clearBrowserCookies');
+                await client.detach();
+                log('INFO', `Cleared old cookies, setting ${clean.length} fresh cookies...`);
+                await page.setCookie(...clean);
+            }
+        } catch (e) { log('WARN', `Cookie load error: ${e.message}`); }
     }
 
-    log('INFO', `Navigating to ${LIST_URL ? 'list' : 'home feed'}...`);
-    await page.goto(FEED_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => log('WARN', '⚠️ Initial nav timeout, proceeding anyway'));
-    await wait(3000);
+    // Wait for React to render logged-in elements (up to maxMs), polling every 2s
+    const waitForLogin = async (maxMs = 45000) => {
+        const selectors = [
+            '[data-testid="SideNav_AccountSwitcher_Button"]',
+            '[data-testid="SideNav_NewTweet_Button"]',
+            '[data-testid="AppTabBar_Profile_Link"]',
+            '[data-testid="SideNav_NewTweet_Floating_Button"]',
+            '[data-testid="primaryColumn"]',
+        ];
+        const deadline = Date.now() + maxMs;
+        while (Date.now() < deadline) {
+            try {
+                const found = await page.evaluate((sels) => sels.some(s => !!document.querySelector(s)), selectors);
+                if (found) return true;
+            } catch (_) { /* page still loading */ }
+            await wait(2000);
+        }
+        return false;
+    };
 
-    const loggedIn = await page.evaluate(() => {
-        // Return true if 'Home' tab, 'Profile' link or the tweet button exists.
-        return !!document.querySelector('[data-testid="SideNav_NewTweet_Button"]') ||
-            !!document.querySelector('[data-testid="AppTabBar_Profile_Link"]') ||
-            !!document.querySelector('[data-testid="SideNav_NewTweet_Floating_Button"]');
-    });
+    // Attempt 1: navigate directly to feed
+    log('INFO', `Navigating to ${LIST_URL ? 'list' : 'home feed'}...`);
+    await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => log('WARN', '⚠️ Initial nav timeout, proceeding anyway'));
+    log('INFO', 'Waiting for React to hydrate (up to 45s)...');
+    let loggedIn = await waitForLogin(45000);
+
+    // Attempt 2: if not logged in, navigate to https://x.com root (triggers cookie handshake)
     if (!loggedIn) {
-        log('ERROR', 'Not logged in!');
+        log('WARN', 'Login check failed on first attempt, retrying via https://x.com ...');
+        await page.goto('https://x.com', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        loggedIn = await waitForLogin(45000);
+    }
+
+    // Attempt 3: try https://x.com/home explicitly
+    if (!loggedIn) {
+        log('WARN', 'Login check failed on second attempt, retrying via https://x.com/home ...');
+        await page.goto('https://x.com/home', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+        loggedIn = await waitForLogin(45000);
+    }
+
+    if (!loggedIn) {
+        log('ERROR', 'Not logged in after 3 attempts!');
         await page.screenshot({ path: path.join(DEBUG_DIR, `feed-not-logged-in-${Date.now()}.png`) });
         await browser.close();
         process.exit(1);
     }
     log('INFO', 'Logged in ✅');
-    await wait(1000);
+
+    // ── Session warmup — browse profile briefly before feed ──────────────
+    // Mimics natural user behaviour: land on profile, scroll, then go to feed
+    log('INFO', 'Warming up session (profile browse)...');
+    await humanMouseMove(page);
+    await page.goto('https://x.com/aptum_', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+    await wait(Math.random() * 2500 + 1500);
+    await humanMouseMove(page);
+    await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 400) + 150));
+    await wait(Math.random() * 1500 + 800);
+    await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 300) + 100));
+    await wait(Math.random() * 1000 + 500);
+    log('INFO', 'Warmup done. Navigating to feed...');
+    await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await wait(5000); // extra wait for React to hydrate feed
+    await humanMouseMove(page);
+    // Debug: screenshot + DOM check right after feed load
+    await page.screenshot({ path: path.join(DEBUG_DIR, `feed-after-warmup-${Date.now()}.png`) }).catch(() => {});
+    const feedDomCheck = await page.evaluate(() => {
+        return {
+            articles: document.querySelectorAll('article[data-testid="tweet"]').length,
+            primaryCol: !!document.querySelector('[data-testid="primaryColumn"]'),
+            newTweetsBar: document.querySelector('[data-testid="cellInnerDiv"]') ? 'yes' : 'no',
+            title: document.title,
+            url: window.location.href,
+        };
+    }).catch(() => ({}));
+    log('INFO', `Feed DOM check: ${JSON.stringify(feedDomCheck)}`);
 
     // ── Reply-Back Phase (before feed engagement) ─────────────────────
     if (REPLY_BACK) {
@@ -1125,7 +1369,7 @@ async function replyBackPhase(page, limit) {
         log('INFO', `Reply-back phase done: ${rbCount} replies sent`);
         // Navigate back to feed for the main engagement loop
         log('INFO', `Navigating back to ${LIST_URL ? 'list' : 'home feed'}...`);
-        await page.goto(FEED_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => { });
+        await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
         await wait(3000);
     }
 
@@ -1167,17 +1411,20 @@ async function replyBackPhase(page, limit) {
             log('DEBUG', `  📋 ${tweets.length} tweets visible, 0 fresh (${tweets.filter(t => seenIds.has(t.id)).length} seen, ${tweets.filter(t => t.alreadyLiked).length} liked, ${tweets.filter(t => t.isRetweet).length} RT, ${tweets.filter(t => t.isReply).length} reply)`);
             consecutiveEmpty++;
             if (consecutiveEmpty >= 3 && consecutiveEmpty % 3 === 0) {
+                await humanMouseMove(page);
                 await page.keyboard.press('.');
                 await wait(2500);
             }
             if (consecutiveEmpty > 15) {
                 const waitSec = Math.floor(Math.random() * 25) + 45;
                 log('INFO', `🔄 No fresh tweets after ${consecutiveEmpty} scrolls. Refreshing, waiting ${waitSec}s...`);
-                await page.goto(FEED_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => { });
+                await humanMouseMove(page);
+                await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
                 await wait(waitSec * 1000);
+                await humanMouseMove(page);
                 await page.keyboard.press('.');
                 await wait(5000);
-                await page.evaluate(() => window.scrollBy(0, 600));
+                await page.evaluate(() => window.scrollBy(0, Math.floor(Math.random() * 400) + 300));
                 await wait(2000);
                 consecutiveEmpty = 0;
             }
@@ -1238,11 +1485,16 @@ async function replyBackPhase(page, limit) {
             }
 
             try {
+                await humanMouseMove(page);
                 await page.goto(`https://x.com/i/status/${tweet.id}`, { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await wait(2000);
+                await wait(Math.random() * 1000 + 1500);
+                await humanMouseMove(page);
 
                 const alreadyLiked = await page.evaluate(() => !!document.querySelector('[data-testid="unlike"]'));
                 if (!alreadyLiked) {
+                    // Human pause before interacting — like reading the tweet
+                    await wait(Math.random() * 2000 + 800);
+                    await humanMouseMove(page);
                     const focused = await page.evaluate(() => {
                         const article = document.querySelector('article[data-testid="tweet"], div[data-testid="tweet"]');
                         if (article) { article.focus(); article.click(); return true; }
@@ -1250,9 +1502,9 @@ async function replyBackPhase(page, limit) {
                     });
 
                     if (focused) {
-                        await wait(300);
+                        await wait(Math.random() * 500 + 200);
                         await page.keyboard.press('l');
-                        await wait(1200);
+                        await wait(Math.random() * 600 + 800);
 
                         const likeVerified = await page.evaluate(() => !!document.querySelector('[data-testid="unlike"]'));
                         if (likeVerified) {
@@ -1300,6 +1552,10 @@ async function replyBackPhase(page, limit) {
                     if (reply && reply.length > 3 && reply.length <= 280) {
                         let replyBoxReady = false;
 
+                        // Human pause before opening reply box — like thinking before typing
+                        await wait(Math.random() * 1500 + 500);
+                        await humanMouseMove(page);
+
                         replyBoxReady = await page.evaluate(() => {
                             const replyBox = document.querySelector('[data-testid="tweetTextarea_0"]');
                             if (replyBox) { replyBox.click(); return true; }
@@ -1307,12 +1563,12 @@ async function replyBackPhase(page, limit) {
                             if (placeholder) { placeholder.click(); return true; }
                             return false;
                         });
-                        await wait(800);
+                        await wait(Math.random() * 400 + 600);
 
                         if (!replyBoxReady) {
                             try {
                                 await page.click('[data-testid="reply"]');
-                                await wait(1000);
+                                await wait(Math.random() * 500 + 800);
                                 replyBoxReady = await page.evaluate(() => !!document.querySelector('[data-testid="tweetTextarea_0"]'));
                             } catch (_) { /* ignore */ }
                         }
@@ -1343,32 +1599,67 @@ async function replyBackPhase(page, limit) {
                             await page.keyboard.down('Control');
                             await page.keyboard.press('Enter');
                             await page.keyboard.up('Control');
-                            await wait(1500);
+                            await wait(2000);
 
-                            const stillOpen = await page.evaluate(() => !!document.querySelector('[data-testid="tweetTextarea_0"]'));
-                            if (stillOpen) {
+                            // Check success: textarea closed (modal) OR toast appeared (inline on tweet page) OR textarea emptied
+                            const checkSubmitted = () => page.evaluate(() => {
+                                if (!document.querySelector('[data-testid="tweetTextarea_0"]')) return true;
+                                const toast = document.querySelector('[data-testid="toast"]');
+                                if (toast && toast.textContent.toLowerCase().includes('sent')) return true;
+                                const ta = document.querySelector('[data-testid="tweetTextarea_0"]');
+                                if (ta && (ta.textContent || '').trim() === '') return true;
+                                return false;
+                            }).catch(() => false);
+
+                            let submitted = await checkSubmitted();
+
+                            if (!submitted) {
+                                // Textarea still open — try button fallback
                                 try {
                                     await page.click('[data-testid="tweetButtonInline"]');
-                                    await wait(2000);
+                                    await wait(2500);
+                                    submitted = await checkSubmitted();
                                 } catch (_) {
-                                    log('WARN', `  ⚠️ Submit fallback failed`);
+                                    log('WARN', `  ⚠️ Submit fallback click failed`);
                                 }
                             }
 
-                            progress.commented++;
-                            log('INFO', `  💬 Replied: "${reply.substring(0, 80)}..."`);
+                            if (submitted) {
+                                // Secondary: grab the posted reply URL from the thread
+                                await wait(1000);
+                                const replyUrl = await page.evaluate(() => {
+                                    try {
+                                        const tweets = document.querySelectorAll('[data-testid="tweet"]');
+                                        if (!tweets.length) return null;
+                                        const last = tweets[tweets.length - 1];
+                                        const timeEl = last.querySelector('time');
+                                        if (!timeEl) return null;
+                                        const link = timeEl.closest('a[href*="/status/"]');
+                                        return link ? link.href : null;
+                                    } catch (_) { return null; }
+                                }).catch(() => null);
 
-                            saveReply({
-                                tweetId: tweet.id,
-                                tweetAuthor: tweet.author,
-                                tweetText: tweet.text,
-                                tweetAge: tweet.ageMin,
-                                reply,
-                                replyLength: reply.length,
-                                filterSignal,
-                                timestamp: new Date().toISOString(),
-                                model: NVIDIA_MODEL,
-                            });
+                                progress.commented++;
+                                const urlNote = replyUrl ? ` → ${replyUrl}` : '';
+                                log('INFO', `  ✅ Reply confirmed: "${reply.substring(0, 80)}..."${urlNote}`);
+
+                                saveReply({
+                                    tweetId: tweet.id,
+                                    tweetAuthor: tweet.author,
+                                    tweetText: tweet.text,
+                                    tweetAge: tweet.ageMin,
+                                    reply,
+                                    replyLength: reply.length,
+                                    filterSignal,
+                                    timestamp: new Date().toISOString(),
+                                    model: NVIDIA_MODEL,
+                                    replyUrl: replyUrl || null,
+                                });
+                            } else {
+                                log('WARN', `  ❌ Reply FAILED to post on tweet ${tweet.id} — textarea still open after fallback`);
+                                await page.screenshot({ path: require('path').join(require('path').join(__dirname, '..', 'debug'), `reply-fail-${Date.now()}.png`) }).catch(() => {});
+                                try { await page.keyboard.press('Escape'); await wait(500); } catch (_) {}
+                            }
                         } else if (replyBoxReady && !safeToReply) {
                             log('WARN', `  🚫 Not on tweet page — aborting reply`);
                             await page.keyboard.press('Escape');
@@ -1380,13 +1671,13 @@ async function replyBackPhase(page, limit) {
                     } else {
                         log('WARN', `  ⚠️  Reply generation failed or too long`);
                     }
+                    
+                    const pauseMs = Math.floor(Math.random() * (MAX_PAUSE - MIN_PAUSE)) + MIN_PAUSE;
+                    log('INFO', `  💤 ${Math.round(pauseMs / 1000)}s pause...`);
+                    await wait(pauseMs);
                 }
 
                 saveProgress(progress);
-
-                const pauseMs = Math.floor(Math.random() * (MAX_PAUSE - MIN_PAUSE)) + MIN_PAUSE;
-                log('INFO', `  💤 ${Math.round(pauseMs / 1000)}s pause...`);
-                await wait(pauseMs);
 
             } catch (e) {
                 log('ERROR', `  ❌ Error on tweet ${tweet.id}: ${e.message}`);
@@ -1395,26 +1686,37 @@ async function replyBackPhase(page, limit) {
                 saveProgress(progress);
             }
 
+            // Human pause after action before going back to feed
+            await wait(Math.random() * 1200 + 600);
+            await humanMouseMove(page);
             try {
                 await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
             } catch (_) {
                 log('WARN', '  ⚠️ Nav timeout returning to feed — retrying...');
                 await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
             }
-            await wait(2000);
+            // Variable wait after returning to feed — like glancing at the page before scrolling
+            await wait(Math.random() * 2500 + 1500);
         }
 
-        const scrollPx = Math.floor(Math.random() * 800) + 600;
+        // Variable scroll distance and speed — no two scrolls the same
+        const scrollPx = Math.floor(Math.random() * 900) + 400;
         await page.evaluate(async (amt) => {
-            const steps = Math.floor(Math.random() * 4) + 3;
+            const steps = Math.floor(Math.random() * 5) + 3;
             const stepAmt = amt / steps;
             for (let i = 0; i < steps; i++) {
-                window.scrollBy(0, stepAmt);
-                await new Promise(r => setTimeout(r, Math.random() * 80 + 30));
+                window.scrollBy(0, stepAmt + (Math.random() * 20 - 10));
+                await new Promise(r => setTimeout(r, Math.random() * 120 + 40));
             }
         }, scrollPx).catch(() => { /* page navigated mid-scroll — harmless, continue */ });
 
-        await randWait(1800, 3500);
+        // Occasional mid-scroll pause — like pausing to read something
+        if (Math.random() < 0.25) {
+            await wait(Math.random() * 2000 + 1000);
+            await humanMouseMove(page);
+        }
+
+        await randWait(1500, 4000);
 
         if (scrollCycles % 5 === 0) {
             log('INFO', `📊 Progress: ${progress.liked}/${DAILY_QUOTA} (${progress.liked} likes, ${progress.commented} comments, ${progress.errors} errors) | scroll #${scrollCycles}`);
@@ -1422,6 +1724,7 @@ async function replyBackPhase(page, limit) {
         }
 
         if (scrollCycles % 15 === 0 && scrollCycles > 0) {
+            await humanMouseMove(page);
             await page.keyboard.press('.');
             await wait(2500);
             log('INFO', 'Loaded new tweets (. key)');
@@ -1432,7 +1735,7 @@ async function replyBackPhase(page, limit) {
             const breakMs = Math.floor(Math.random() * 1200000) + 1200000; // 20-40 min break
             log('INFO', `☕ Long break (${Math.round(breakMs / 60000)}min) after ${total} actions to avoid spam detection...`);
             await wait(breakMs);
-            await page.goto(FEED_URL, { waitUntil: 'networkidle2', timeout: 60000 }).catch(() => { });
+            await page.goto(FEED_URL, { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => { });
             await wait(3000);
         }
     }

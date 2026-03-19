@@ -8,6 +8,8 @@ description: Automated X/Twitter engagement — three modes (Automation, Hybrid,
 Tri-mode X engagement engine. Classifies posts (SKIP/PASS/SHILL), generates AI replies, likes with human pacing.
 
 > Full technical docs: `documentation.md`
+> Command reference (how user starts/stops batches): `user-behavior.md`
+> VPS error guide: `debug.md`
 
 ## Engagement Modes
 
