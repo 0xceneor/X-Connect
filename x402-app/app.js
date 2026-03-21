@@ -2,13 +2,14 @@
  * x-connect x402 Unlock Server
  *
  * Runs as a cPanel Node.js app (Phusion Passenger).
- * Apache proxies /x-connect/* to this process.
+ * LiteSpeed proxies /x-connect/* to this process via .htaccess ProxyPass.
  *
  * Endpoints:
  *   GET /x-connect/skill.md          → public skill manifest (agent entry point)
  *   GET /x-connect/api/unlock        → x402 paywall ($59 USDC, Base mainnet)
  *   GET /x-connect/api/download      → download x-connect.zip (requires API key)
  *   GET /x-connect/api/verify        → check if a key is valid
+ *   GET /x-connect/api/health        → health check
  */
 
 'use strict';
@@ -28,53 +29,92 @@ const { facilitator: cdpFacilitator } = require('@coinbase/x402');
 const app  = express();
 const PORT = process.env.PORT || 3001;
 
+// Fix #1 — trust LiteSpeed's X-Forwarded-Proto so req.protocol reports 'https'
+// Without this, the 402 resource URL is http:// even when clients reach us over HTTPS
+app.set('trust proxy', 1);
+
 // ── Paths ─────────────────────────────────────────────────────────────────────
-const KEYS_FILE    = path.join(__dirname, 'agentusers', '.env');
+const KEYS_FILE    = path.join(__dirname, 'agentusers', 'keys.json');
 const PACKAGE_ZIP  = path.join(__dirname, 'public', 'x-connect-fresh.zip');
 const SKILL_MD     = path.join(__dirname, 'public', 'skill.md');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const RECEIVE_WALLET = process.env.RECEIVE_WALLET || '0x212816755ca6016F31DAa09cBf6814Ed49AF8579';
-const USE_TESTNET    = process.env.USE_TESTNET !== 'false'; // default: testnet until flipped
 
-const FACILITATOR_URL = process.env.FACILITATOR_URL || 'https://api.cdp.coinbase.com/platform/v2/x402';
-const NETWORK         = USE_TESTNET ? 'eip155:84532' : 'eip155:8453';
+// Fix #6 — default to mainnet; must explicitly set USE_TESTNET=true to use testnet
+const USE_TESTNET = process.env.USE_TESTNET === 'true';
+const NETWORK     = USE_TESTNET ? 'eip155:84532' : 'eip155:8453';
 
-// ── Key store ─────────────────────────────────────────────────────────────────
+const KEY_EXPIRY_MS    = 365 * 24 * 60 * 60 * 1000; // Fix #7 — 1 year expiry
+const MAX_DOWNLOADS    = 10;                           // Fix #5 — max downloads per key
+
+// ── Key store (JSON) ──────────────────────────────────────────────────────────
+// Format: { "<walletOrSigId>": { apiKey, timestamp, ip, downloads, expiresAt } }
+
+// Fix #4 — in-memory write lock; Node.js is single-threaded but guard the
+//           read-modify-write cycle to prevent logical races on future async refactors
+const _writeLock = new Set();
+
 function loadKeys() {
-    if (!fs.existsSync(KEYS_FILE)) return {};
-    const lines = fs.readFileSync(KEYS_FILE, 'utf8').split('\n');
-    const keys = {};
-    for (const line of lines) {
-        if (!line.startsWith('AGENT_')) continue;
-        const eqIdx = line.indexOf('=');
-        if (eqIdx === -1) continue;
-        const wallet = line.slice(6, eqIdx);         // strip 'AGENT_'
-        const value  = line.slice(eqIdx + 1).trim();
-        const [apiKey] = value.split(':');
-        keys[wallet] = { apiKey, raw: value };
-    }
-    return keys;
-}
-
-function saveKey(wallet, apiKey) {
     const dir = path.dirname(KEYS_FILE);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-    const entry = `AGENT_${wallet}=${apiKey}:${Date.now()}\n`;
-    fs.appendFileSync(KEYS_FILE, entry);
+    if (!fs.existsSync(KEYS_FILE)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(KEYS_FILE, 'utf8'));
+    } catch (_) {
+        return {};
+    }
+}
+
+function saveKeys(keys) {
+    const dir = path.dirname(KEYS_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // Atomic write: write to temp file then rename
+    const tmp = KEYS_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(keys, null, 2));
+    fs.renameSync(tmp, KEYS_FILE);
 }
 
 function isValidKey(apiKey) {
     if (!apiKey || !apiKey.startsWith('xc_')) return false;
     const keys = loadKeys();
-    return Object.values(keys).some(({ raw }) => raw.startsWith(apiKey + ':'));
+    const entry = Object.values(keys).find(e => e.apiKey === apiKey);
+    if (!entry) return false;
+    // Fix #7 — reject expired keys
+    if (entry.expiresAt && Date.now() > entry.expiresAt) return false;
+    return true;
+}
+
+// Fix #2 — robust wallet extraction from x402 payment header
+function extractWallet(req) {
+    const header = req.headers['x-payment'] || req.headers['payment-signature'] || '';
+    if (!header) return null;
+    try {
+        const decoded = JSON.parse(Buffer.from(header, 'base64').toString('utf8'));
+        const wallet = decoded?.payload?.authorization?.from
+                    || decoded?.authorization?.from
+                    || decoded?.from
+                    || decoded?.wallet;
+        if (wallet && /^0x[0-9a-fA-F]{40}$/.test(wallet)) return wallet.toLowerCase();
+    } catch (_) {}
+    // Fallback: use SHA-256 of the raw header as a stable dedup key
+    // Same payment = same header = same key; prevents double-issuance
+    return 'sig_' + crypto.createHash('sha256').update(header).digest('hex').slice(0, 16);
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
-app.use(cors());
+
+// Fix #9 — explicit CORS config instead of wildcard
+app.use(cors({
+    origin: '*',                   // x402 agents call from any origin — keep open
+    methods: ['GET'],
+    allowedHeaders: ['Content-Type', 'X-API-Key', 'x-payment', 'payment-signature'],
+    exposedHeaders: ['payment-required'],
+}));
+
 app.use(express.json());
 
-// x402 paywall — only on the unlock route
+// x402 paywall
 const facilitatorClient = new HTTPFacilitatorClient(cdpFacilitator);
 const resourceServer    = new x402ResourceServer(facilitatorClient)
     .register(NETWORK, new ExactEvmScheme());
@@ -85,10 +125,10 @@ app.use(
             'GET /x-connect/api/unlock': {
                 accepts: [
                     {
-                        scheme: 'exact',
-                        price:  '$59',
+                        scheme:  'exact',
+                        price:   '$59',
                         network: NETWORK,
-                        payTo:  RECEIVE_WALLET,
+                        payTo:   RECEIVE_WALLET,
                     },
                 ],
                 description: 'One-time unlock for the x-connect AI engagement skill ($59 USDC on Base)',
@@ -102,89 +142,134 @@ app.use(
 
 // Public skill manifest
 app.get('/x-connect/skill.md', (req, res) => {
-    if (!fs.existsSync(SKILL_MD)) {
-        return res.status(404).send('skill.md not found');
-    }
+    if (!fs.existsSync(SKILL_MD)) return res.status(404).send('skill.md not found');
     res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
     res.sendFile(SKILL_MD);
 });
 
-// Unlock — payment already verified by x402 middleware before reaching here
+// Unlock — payment already verified by x402 middleware
 app.get('/x-connect/api/unlock', (req, res) => {
-    // Extract paying wallet from x402 payment payload header
-    let wallet = 'unknown';
-    try {
-        const sigHeader = req.headers['x-payment'] || req.headers['payment-signature'] || '';
-        if (sigHeader) {
-            const decoded = JSON.parse(Buffer.from(sigHeader, 'base64').toString('utf8'));
-            wallet = decoded?.payload?.authorization?.from
-                  || decoded?.from
-                  || decoded?.wallet
-                  || 'unknown';
-        }
-    } catch (_) { /* wallet stays unknown */ }
+    const walletId = extractWallet(req); // Fix #2
 
-    if (wallet === 'unknown') {
-        wallet = 'wallet_' + crypto.randomBytes(4).toString('hex');
+    if (!walletId) {
+        return res.status(400).json({ error: 'Could not identify payment source.' });
     }
 
-    // Check if this wallet already has a key (idempotent — won't double-charge)
-    const existing = loadKeys();
-    if (existing[wallet]) {
+    // Fix #4 — lock this wallet for the duration of the check+save
+    if (_writeLock.has(walletId)) {
+        return res.status(429).json({ error: 'Concurrent request for same wallet. Retry shortly.' });
+    }
+    _writeLock.add(walletId);
+
+    try {
+        const keys = loadKeys();
+
+        // Idempotency: return existing key if already paid
+        if (keys[walletId]) {
+            const entry = keys[walletId];
+            if (!entry.expiresAt || Date.now() <= entry.expiresAt) {
+                return res.json({
+                    success:     true,
+                    alreadyPaid: true,
+                    apiKey:      entry.apiKey,
+                    downloadUrl: `https://aptum.fun/x-connect/api/download?key=${entry.apiKey}`,
+                    message:     'You already have an active key for this wallet.',
+                });
+            }
+        }
+
+        // Issue new key
+        const apiKey    = 'xc_' + crypto.randomBytes(32).toString('hex');
+        const now       = Date.now();
+        const clientIp  = req.ip || req.headers['x-forwarded-for'] || 'unknown'; // Fix #8
+
+        keys[walletId] = {
+            apiKey,
+            timestamp:  now,
+            expiresAt:  now + KEY_EXPIRY_MS, // Fix #7
+            ip:         clientIp,             // Fix #8
+            downloads:  0,                    // Fix #5
+        };
+
+        saveKeys(keys);
+
+        console.log(`[x402] New unlock — id: ${walletId.slice(0, 14)} | ip: ${clientIp} | key: ${apiKey.slice(0, 12)}...`);
+
         return res.json({
             success:     true,
-            alreadyPaid: true,
-            apiKey:      existing[wallet].apiKey,
-            downloadUrl: `https://aptum.fun/x-connect/api/download?key=${existing[wallet].apiKey}`,
-            message:     'You already have an active key for this wallet.',
+            apiKey,
+            downloadUrl: `https://aptum.fun/x-connect/api/download?key=${apiKey}`,
+            instructions: [
+                '1. Save your API key — it will not be shown again.',
+                '2. Download: GET /x-connect/api/download?key=<YOUR_KEY>',
+                '3. Extract and run: npm install && node scripts/x-feed-engage.js',
+            ],
+            docs: 'https://aptum.fun/x-connect/skill.md',
         });
+
+    } finally {
+        _writeLock.delete(walletId); // Fix #4 — always release lock
     }
-
-    // Generate fresh key
-    const apiKey = 'xc_' + crypto.randomBytes(32).toString('hex');
-    saveKey(wallet, apiKey);
-
-    console.log(`[x402] New unlock — wallet: ${wallet} | key: ${apiKey.slice(0, 12)}...`);
-
-    res.json({
-        success:     true,
-        apiKey,
-        wallet,
-        downloadUrl: `https://aptum.fun/x-connect/api/download?key=${apiKey}`,
-        instructions: [
-            '1. Save your API key — it will not be shown again.',
-            '2. Download the module: GET /x-connect/api/download?key=<YOUR_KEY>',
-            '3. Extract and run: npm install && node scripts/x-feed-engage.js',
-        ],
-        docs: 'https://aptum.fun/x-connect/skill.md',
-    });
 });
 
-// Download — requires valid API key
+// Download — requires valid API key, enforces download limit
 app.get('/x-connect/api/download', (req, res) => {
     const { key } = req.query;
 
-    if (!isValidKey(key)) {
+    if (!key || !key.startsWith('xc_')) {
         return res.status(401).json({
-            error:   'Invalid or missing API key.',
+            error:    'Invalid or missing API key.',
             howToGet: 'Send GET /x-connect/api/unlock with $59 USDC on Base to receive your key.',
         });
     }
 
-    if (!fs.existsSync(PACKAGE_ZIP)) {
-        return res.status(503).json({
-            error: 'Package not yet built. Please try again shortly or contact support.',
+    const keys   = loadKeys();
+    const entry  = Object.entries(keys).find(([, e]) => e.apiKey === key);
+
+    if (!entry) {
+        return res.status(401).json({ error: 'Key not found.' });
+    }
+
+    const [walletId, record] = entry;
+
+    // Fix #7 — check expiry
+    if (record.expiresAt && Date.now() > record.expiresAt) {
+        return res.status(403).json({ error: 'Key has expired.' });
+    }
+
+    // Fix #5 — enforce download limit
+    if (record.downloads >= MAX_DOWNLOADS) {
+        return res.status(403).json({
+            error: `Download limit reached (${MAX_DOWNLOADS}). Contact support if you need a re-download.`,
         });
     }
 
-    console.log(`[download] Key ${key.slice(0, 12)}... downloading x-connect-fresh.zip`);
+    if (!fs.existsSync(PACKAGE_ZIP)) {
+        return res.status(503).json({ error: 'Package not yet built. Try again shortly.' });
+    }
+
+    // Increment download count atomically
+    if (!_writeLock.has(walletId)) {
+        _writeLock.add(walletId);
+        try {
+            const fresh = loadKeys();
+            if (fresh[walletId]) {
+                fresh[walletId].downloads = (fresh[walletId].downloads || 0) + 1;
+                saveKeys(fresh);
+            }
+        } finally {
+            _writeLock.delete(walletId);
+        }
+    }
+
+    console.log(`[download] Key ${key.slice(0, 12)}... download #${record.downloads + 1}`);
 
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', 'attachment; filename="x-connect.zip"');
     fs.createReadStream(PACKAGE_ZIP).pipe(res);
 });
 
-// Key verification — agents can check if their key is still valid
+// Verify key
 app.get('/x-connect/api/verify', (req, res) => {
     const key = req.query.key || req.headers['x-api-key'];
     res.json({ valid: isValidKey(key) });
@@ -193,11 +278,11 @@ app.get('/x-connect/api/verify', (req, res) => {
 // Health check
 app.get('/x-connect/api/health', (req, res) => {
     res.json({
-        status:    'ok',
-        network:   USE_TESTNET ? 'base-sepolia (testnet)' : 'base-mainnet',
-        price:     '$59 USDC',
-        payTo:     RECEIVE_WALLET,
-        agents:    Object.keys(loadKeys()).length,
+        status:  'ok',
+        network: USE_TESTNET ? 'base-sepolia (testnet)' : 'base-mainnet',
+        price:   '$59 USDC',
+        payTo:   RECEIVE_WALLET,
+        agents:  Object.keys(loadKeys()).length,
     });
 });
 

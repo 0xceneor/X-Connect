@@ -1,0 +1,13 @@
+# ── Signal Feed rules ──────────────────────────────────────────────────────
+# Add these to ~/public_html/.htaccess on aptum.fun
+# (merge with any existing rules — don't replace the whole file)
+
+RewriteEngine On
+
+# aptum.fun/feed  →  feed.php (no .php in URL)
+RewriteRule ^feed/?$  /feed.php  [L]
+
+# Block direct access to feed-data.json
+<Files "feed-data.json">
+    Require all denied
+</Files>

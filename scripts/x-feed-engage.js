@@ -39,6 +39,7 @@ const DEBUG_DIR = path.join(__dirname, '..', 'debug');
 const LOG_FILE = path.join(DEBUG_DIR, 'x-feed-engage.log');
 const COOKIES_PATH = path.join(__dirname, 'cookies.json');
 const REPLIED_FILE = path.join(DEBUG_DIR, 'replied.json');
+const ENGAGED_URLS_FILE = path.join(DEBUG_DIR, 'engaged-urls.txt');
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 if (!NVIDIA_API_KEY) { console.error('❌ NVIDIA_API_KEY not set in .env'); process.exit(1); }
@@ -103,6 +104,41 @@ function saveProgress(progress) {
     }
     progress.lastAction = new Date().toISOString();
     try { fs.writeFileSync(PROGRESS_FILE, JSON.stringify(progress, null, 2)); } catch (_) { /* ignore */ }
+}
+
+function appendEngagedUrl(tweetAuthor, tweetId) {
+    const url = `https://x.com/${tweetAuthor}/status/${tweetId}`;
+    try { fs.appendFileSync(ENGAGED_URLS_FILE, url + '\n'); } catch (_) { /* ignore */ }
+    return url;
+}
+
+// ── Signal Feed push ─────────────────────────────────────────────────────
+// Fire-and-forget POST to feed.php after each confirmed engagement.
+// Set FEED_PUSH_URL and FEED_PUSH_SECRET in .env to enable.
+function pushToFeed(tweet, analysis, reply, replyUrl, imageDesc, signal) {
+    const url    = process.env.FEED_PUSH_URL;
+    const secret = process.env.FEED_PUSH_SECRET;
+    if (!url || !secret) return;
+    fetch(url, {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            secret,
+            id:        tweet.id,
+            author:    tweet.author,
+            text:      (tweet.text || '').slice(0, 280),
+            signal,
+            topic:     analysis?.topic    || 'unknown',
+            tone:      analysis?.tone     || 'unknown',
+            reply:     (reply || '').substring(0, 280),
+            replyUrl:  replyUrl || null,
+            imageDesc: imageDesc || null,
+            imageUrls: (tweet.imageUrls || []).slice(0, 2),
+            stats:     tweet.stats || null,
+            engagedAt: new Date().toISOString(),
+        }),
+        signal: AbortSignal.timeout(8000),
+    }).catch(() => { /* non-blocking — ignore all errors */ });
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────
@@ -747,6 +783,25 @@ function extractTweetsFromPage(page, maxAgeMin) {
                     imageUrls = Array.from(imgs).map(img => img.src || '').filter(src => src && !src.includes('profile_images') && !src.includes('emoji') && !src.includes('hashflag'));
                 }
 
+                const getStatCount = (testId) => {
+                    const btn = article.querySelector(`[data-testid="${testId}"]`);
+                    if (!btn) return null;
+                    const label = btn.getAttribute('aria-label') || '';
+                    const m = label.match(/([\d,]+)/);
+                    if (m) return parseInt(m[1].replace(/,/g, ''), 10);
+                    const spans = btn.querySelectorAll('span');
+                    for (const s of spans) {
+                        const t = (s.textContent || '').trim();
+                        if (/^\d/.test(t)) return parseInt(t.replace(/[,K]/g, (c) => c === 'K' ? '000' : ''), 10) || 0;
+                    }
+                    return null;
+                };
+                const stats = {
+                    replies:  getStatCount('reply'),
+                    reposts:  getStatCount('retweet'),
+                    likes:    getStatCount('like'),
+                };
+
                 results.push({
                     id, author,
                     text: text.substring(0, 500),
@@ -756,6 +811,7 @@ function extractTweetsFromPage(page, maxAgeMin) {
                     isAd: !!isAd,
                     alreadyLiked: !!alreadyLiked,
                     imageUrls: imageUrls.slice(0, 4),
+                    stats,
                 });
             } catch (_) { /* skip this article */ }
         }
@@ -1509,13 +1565,15 @@ async function replyBackPhase(page, limit) {
                         const likeVerified = await page.evaluate(() => !!document.querySelector('[data-testid="unlike"]'));
                         if (likeVerified) {
                             progress.liked++;
-                            log('INFO', `  ❤️  Liked (keyboard L, verified)`);
+                            const tweetUrl = appendEngagedUrl(tweet.author, tweet.id);
+                            log('INFO', `  ❤️  Liked (keyboard L, verified) → ${tweetUrl}`);
                         } else {
                             try {
                                 await page.click('[data-testid="like"]');
                                 await wait(1000);
                                 progress.liked++;
-                                log('INFO', `  ❤️  Liked (click fallback)`);
+                                const tweetUrl = appendEngagedUrl(tweet.author, tweet.id);
+                                log('INFO', `  ❤️  Liked (click fallback) → ${tweetUrl}`);
                             } catch (_) {
                                 log('WARN', `  ⚠️  Like failed`);
                                 progress.errors++;
@@ -1655,6 +1713,7 @@ async function replyBackPhase(page, limit) {
                                     model: NVIDIA_MODEL,
                                     replyUrl: replyUrl || null,
                                 });
+                                pushToFeed(tweet, analysis, reply, replyUrl, imageDesc, filterSignal);
                             } else {
                                 log('WARN', `  ❌ Reply FAILED to post on tweet ${tweet.id} — textarea still open after fallback`);
                                 await page.screenshot({ path: require('path').join(require('path').join(__dirname, '..', 'debug'), `reply-fail-${Date.now()}.png`) }).catch(() => {});
