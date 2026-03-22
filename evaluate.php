@@ -11,6 +11,24 @@ define('MAX_EVALS',    200);
 
 if (!is_dir(EVAL_DIR)) mkdir(EVAL_DIR, 0755, true);
 
+// ── Image proxy (same-origin for html2canvas) ─────────────────────────────────
+if (($_GET['proxy'] ?? '') === '1') {
+    $raw = $_GET['imgurl'] ?? '';
+    // Only allow twitter/x avatar hosts
+    if (!preg_match('#^https://[a-z0-9.\-]*(twimg\.com|unavatar\.io)/#i', $raw)) {
+        http_response_code(403); exit;
+    }
+    $img = @file_get_contents($raw, false, stream_context_create([
+        'http' => ['timeout' => 6, 'header' => "User-Agent: Mozilla/5.0\r\n"]
+    ]));
+    if (!$img) { http_response_code(502); exit; }
+    $finfo = new finfo(FILEINFO_MIME_TYPE);
+    $mime  = $finfo->buffer($img) ?: 'image/jpeg';
+    header("Content-Type: $mime");
+    header('Cache-Control: public, max-age=3600');
+    echo $img; exit;
+}
+
 // ── POST: receive evaluation from x-evaluate.js ──────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
@@ -440,110 +458,95 @@ body::before {
   <?php
     $cardUsername   = $evalData['username'] ?? '';
     $cardDisplay    = $pr['displayName'] ?? '';
-    $cardBio        = substr($pr['bio'] ?? '', 0, 110);
+    $cardBio        = substr($pr['bio'] ?? '', 0, 90);
     $cardFollowers  = $pr['followers'] ?? '—';
     $cardFollowing  = $pr['following'] ?? '—';
     $cardPosts      = $pr['tweetCount'] ?? '—';
     $cardScore      = number_format($overall, 1);
     $cardGrade      = $ev['grade'] ?? '';
-    $cardNiche      = $ev['niche'] ?? '';
-    $cardActions    = array_slice($ev['top_actions'] ?? [], 0, 3);
+    $cardNiche      = strtoupper($ev['niche'] ?? '');
     $cardDate       = date('M j, Y', strtotime($evalData['scannedAt'] ?? 'now'));
-    $pfpUrl         = 'https://unavatar.io/x/' . urlencode($cardUsername);
+    $rawPfp         = 'https://unavatar.io/x/' . urlencode($cardUsername);
+    $pfpProxy       = '/evaluate?proxy=1&imgurl=' . urlencode($rawPfp);
   ?>
+  <!-- ── SHARE CARD 1080×1080 ── -->
   <div id="share-card" style="
     position:fixed; left:-9999px; top:0;
-    width:1200px; height:630px;
+    width:1080px; height:1080px;
     background:#0A0C10;
     font-family:'IBM Plex Mono',monospace;
     display:flex; flex-direction:column;
     overflow:hidden;
   ">
     <!-- Top accent line -->
-    <div style="height:5px;background:<?= $sc ?>;width:100%;flex-shrink:0;"></div>
+    <div style="height:6px;background:<?= $sc ?>;width:100%;flex-shrink:0;"></div>
 
-    <!-- Main content row -->
-    <div style="flex:1;display:flex;padding:36px 48px 0;gap:0;overflow:hidden;min-height:0;">
-
-      <!-- LEFT: profile (300px) -->
-      <div style="width:300px;flex-shrink:0;display:flex;flex-direction:column;gap:18px;padding-right:40px;border-right:1px solid rgba(255,255,255,.07);">
-        <div style="display:flex;align-items:center;gap:14px;">
-          <img src="<?= htmlspecialchars($pfpUrl) ?>" crossorigin="anonymous"
-               style="width:64px;height:64px;border-radius:50%;border:2px solid #1e2128;object-fit:cover;"
-               onerror="this.style.display='none'">
-          <div>
-            <div style="font-family:'Syne',sans-serif;font-size:17px;font-weight:800;color:#FFFFFF;letter-spacing:.02em;">@<?= htmlspecialchars($cardUsername) ?></div>
-            <?php if ($cardDisplay): ?>
-            <div style="font-size:11px;color:rgba(255,255,255,.4);margin-top:2px;"><?= htmlspecialchars($cardDisplay) ?></div>
-            <?php endif; ?>
-          </div>
-        </div>
+    <!-- Header: profile row -->
+    <div style="padding:44px 56px 32px;display:flex;align-items:center;gap:24px;flex-shrink:0;border-bottom:1px solid rgba(255,255,255,.07);">
+      <img src="<?= htmlspecialchars($pfpProxy) ?>"
+           style="width:88px;height:88px;border-radius:50%;border:3px solid <?= $sc ?>;object-fit:cover;flex-shrink:0;"
+           onerror="this.style.visibility='hidden'">
+      <div style="flex:1;min-width:0;">
+        <div style="font-family:'Syne',sans-serif;font-size:26px;font-weight:800;color:#FFFFFF;letter-spacing:.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">@<?= htmlspecialchars($cardUsername) ?></div>
+        <?php if ($cardDisplay): ?>
+        <div style="font-size:13px;color:rgba(255,255,255,.4);margin-top:3px;"><?= htmlspecialchars($cardDisplay) ?></div>
+        <?php endif; ?>
         <?php if ($cardBio): ?>
-        <div style="font-size:11px;color:rgba(255,255,255,.55);line-height:1.65;"><?= htmlspecialchars($cardBio) ?></div>
-        <?php endif; ?>
-        <div style="display:flex;gap:18px;">
-          <div>
-            <div style="font-size:17px;font-weight:700;color:#fff;letter-spacing:-.01em;"><?= htmlspecialchars($cardFollowers) ?></div>
-            <div style="font-size:9px;color:rgba(255,255,255,.3);letter-spacing:.12em;margin-top:2px;">FOLLOWERS</div>
-          </div>
-          <div>
-            <div style="font-size:17px;font-weight:700;color:#fff;letter-spacing:-.01em;"><?= htmlspecialchars($cardFollowing) ?></div>
-            <div style="font-size:9px;color:rgba(255,255,255,.3);letter-spacing:.12em;margin-top:2px;">FOLLOWING</div>
-          </div>
-          <div>
-            <div style="font-size:17px;font-weight:700;color:#fff;letter-spacing:-.01em;"><?= htmlspecialchars($cardPosts) ?></div>
-            <div style="font-size:9px;color:rgba(255,255,255,.3);letter-spacing:.12em;margin-top:2px;">POSTS</div>
-          </div>
-        </div>
-      </div>
-
-      <!-- CENTER: score -->
-      <div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:0 44px;">
-        <div style="font-size:9px;font-weight:700;letter-spacing:.22em;color:rgba(255,255,255,.25);margin-bottom:10px;">OVERALL SCORE</div>
-        <div style="font-family:'Syne',sans-serif;font-size:108px;font-weight:800;line-height:1;color:<?= $sc ?>;letter-spacing:-.03em;"><?= $cardScore ?></div>
-        <div style="font-size:15px;font-weight:700;letter-spacing:.18em;color:<?= $sc ?>;margin-top:8px;"><?= htmlspecialchars($cardGrade) ?></div>
-        <?php if ($cardNiche): ?>
-        <div style="margin-top:16px;padding:4px 18px;border:1px solid rgba(255,255,255,.12);font-size:9px;letter-spacing:.16em;text-transform:uppercase;color:rgba(255,255,255,.45);"><?= htmlspecialchars($cardNiche) ?></div>
+        <div style="font-size:11.5px;color:rgba(255,255,255,.45);margin-top:8px;line-height:1.55;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;"><?= htmlspecialchars($cardBio) ?></div>
         <?php endif; ?>
       </div>
-
-      <!-- RIGHT: dimension bars (260px) -->
-      <div style="width:260px;flex-shrink:0;display:flex;flex-direction:column;justify-content:center;gap:13px;padding-left:40px;border-left:1px solid rgba(255,255,255,.07);">
-        <?php foreach (array_slice($ev['dimensions'] ?? [], 0, 5) as $dim):
-          $ds  = (float)($dim['score'] ?? 0);
-          $dsc2 = scoreColor($ds);
-          $dpct = barPct($ds);
-        ?>
-        <div>
-          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px;">
-            <span style="font-size:10px;color:rgba(255,255,255,.55);"><?= htmlspecialchars($dim['label'] ?? '') ?></span>
-            <span style="font-size:11px;font-weight:700;color:<?= $dsc2 ?>;"><?= number_format($ds,1) ?></span>
-          </div>
-          <div style="height:3px;background:rgba(255,255,255,.08);width:100%;">
-            <div style="height:3px;background:<?= $dsc2 ?>;width:<?= $dpct ?>%;"></div>
-          </div>
+      <!-- Stats -->
+      <div style="display:flex;gap:28px;flex-shrink:0;">
+        <?php foreach (['FOLLOWERS'=>$cardFollowers,'FOLLOWING'=>$cardFollowing,'POSTS'=>$cardPosts] as $lbl=>$val): ?>
+        <div style="text-align:center;">
+          <div style="font-size:20px;font-weight:700;color:#fff;letter-spacing:-.01em;"><?= htmlspecialchars($val) ?></div>
+          <div style="font-size:8px;color:rgba(255,255,255,.28);letter-spacing:.14em;margin-top:3px;"><?= $lbl ?></div>
         </div>
         <?php endforeach; ?>
       </div>
-
     </div>
 
-    <!-- Actions strip -->
-    <?php if ($cardActions): ?>
-    <div style="padding:16px 48px;border-top:1px solid rgba(255,255,255,.06);display:flex;gap:10px;align-items:flex-start;flex-shrink:0;">
-      <div style="font-size:8px;font-weight:700;letter-spacing:.2em;color:rgba(255,255,255,.25);padding-top:1px;flex-shrink:0;min-width:90px;">TOP ACTIONS</div>
-      <?php foreach ($cardActions as $i => $act): ?>
-      <div style="flex:1;font-size:10.5px;color:rgba(255,255,255,.65);line-height:1.45;">
-        <span style="color:rgba(255,255,255,.2);margin-right:5px;">0<?= $i+1 ?>.</span><?= htmlspecialchars($act) ?>
+    <!-- Score block -->
+    <div style="padding:44px 56px 36px;display:flex;align-items:center;gap:48px;flex-shrink:0;">
+      <div style="text-align:center;flex-shrink:0;">
+        <div style="font-size:9px;font-weight:700;letter-spacing:.22em;color:rgba(255,255,255,.25);margin-bottom:8px;">OVERALL SCORE</div>
+        <div style="font-family:'Syne',sans-serif;font-size:120px;font-weight:800;line-height:1;color:<?= $sc ?>;letter-spacing:-.03em;"><?= $cardScore ?></div>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:14px;">
+        <div style="display:flex;align-items:center;gap:12px;">
+          <div style="font-size:9px;font-weight:700;letter-spacing:.18em;color:rgba(255,255,255,.3);">TIER</div>
+          <div style="font-family:'Syne',sans-serif;font-size:36px;font-weight:800;color:<?= $sc ?>;letter-spacing:.04em;"><?= htmlspecialchars($cardGrade) ?></div>
+        </div>
+        <?php if ($cardNiche): ?>
+        <div style="padding:5px 16px;border:1px solid rgba(255,255,255,.14);font-size:9.5px;letter-spacing:.16em;color:rgba(255,255,255,.5);display:inline-block;width:fit-content;"><?= htmlspecialchars($cardNiche) ?></div>
+        <?php endif; ?>
+      </div>
+    </div>
+
+    <!-- Dimensions -->
+    <div style="flex:1;padding:0 56px 32px;display:flex;flex-direction:column;justify-content:center;gap:18px;min-height:0;">
+      <div style="font-size:8px;font-weight:700;letter-spacing:.2em;color:rgba(255,255,255,.22);margin-bottom:4px;">DIMENSIONS</div>
+      <?php foreach (array_slice($ev['dimensions'] ?? [], 0, 5) as $dim):
+        $ds   = (float)($dim['score'] ?? 0);
+        $dsc2 = scoreColor($ds);
+        $dpct = barPct($ds);
+      ?>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px;">
+          <span style="font-size:13px;color:rgba(255,255,255,.65);letter-spacing:.01em;"><?= htmlspecialchars($dim['label'] ?? '') ?></span>
+          <span style="font-size:14px;font-weight:700;color:<?= $dsc2 ?>;"><?= number_format($ds,1) ?></span>
+        </div>
+        <div style="height:4px;background:rgba(255,255,255,.07);width:100%;border-radius:2px;">
+          <div style="height:4px;background:<?= $dsc2 ?>;width:<?= $dpct ?>%;border-radius:2px;"></div>
+        </div>
       </div>
       <?php endforeach; ?>
     </div>
-    <?php endif; ?>
 
-    <!-- Footer branding -->
-    <div style="height:38px;background:rgba(255,255,255,.025);display:flex;align-items:center;justify-content:space-between;padding:0 48px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.06);">
-      <span style="font-family:'Syne',sans-serif;font-size:13px;font-weight:800;letter-spacing:.2em;color:rgba(255,255,255,.85);">APTUM</span>
-      <span style="font-size:10px;color:rgba(255,255,255,.28);letter-spacing:.1em;">aptum.fun/evaluate</span>
+    <!-- Footer -->
+    <div style="height:48px;background:rgba(255,255,255,.02);display:flex;align-items:center;justify-content:space-between;padding:0 56px;flex-shrink:0;border-top:1px solid rgba(255,255,255,.07);">
+      <span style="font-family:'Syne',sans-serif;font-size:16px;font-weight:800;letter-spacing:.22em;color:rgba(255,255,255,.85);">APTUM</span>
+      <span style="font-size:10px;color:rgba(255,255,255,.3);letter-spacing:.1em;">aptum.fun/evaluate</span>
       <span style="font-size:10px;color:rgba(255,255,255,.22);letter-spacing:.06em;"><?= htmlspecialchars($cardDate) ?></span>
     </div>
   </div><!-- /#share-card -->
@@ -593,8 +596,8 @@ function downloadCard() {
 
   document.fonts.ready.then(function() {
     html2canvas(card, {
-      width:           1200,
-      height:          630,
+      width:           1080,
+      height:          1080,
       scale:           1,
       useCORS:         true,
       allowTaint:      false,
