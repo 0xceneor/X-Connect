@@ -1,10 +1,7 @@
 <?php
 /**
  * feed.php — Signal Feed
- *
- * Dual-purpose:
- *   POST  → push receiver (called by x-feed-engage.js after each engagement)
- *   GET   → renders the live signal feed at aptum.fun/feed
+ * POST → push receiver | GET → live signal feed viewer
  */
 
 define('PUSH_SECRET', getenv('FEED_PUSH_SECRET') ?: '68b68e6fc9c5bb4203c4352c491903836bb639690fb8df19');
@@ -12,65 +9,46 @@ define('FEED_DATA',   __DIR__ . '/feed-data.json');
 define('MAX_ENTRIES', 500);
 define('DEFAULT_LIMIT', 50);
 
-// ── POST: push receiver ─────────────────────────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     header('Content-Type: application/json');
-    $raw  = file_get_contents('php://input');
-    $data = json_decode($raw, true);
-
+    $data = json_decode(file_get_contents('php://input'), true);
     if (!$data || !PUSH_SECRET || ($data['secret'] ?? '') !== PUSH_SECRET) {
-        http_response_code(403);
-        echo json_encode(['error' => 'Forbidden']);
-        exit;
+        http_response_code(403); echo json_encode(['error' => 'Forbidden']); exit;
     }
-
     unset($data['secret']);
     $data['receivedAt'] = date('c');
-
-    $feed = file_exists(FEED_DATA)
-        ? (json_decode(file_get_contents(FEED_DATA), true) ?: [])
-        : [];
-
+    $feed = file_exists(FEED_DATA) ? (json_decode(file_get_contents(FEED_DATA), true) ?: []) : [];
     array_unshift($feed, $data);
     if (count($feed) > MAX_ENTRIES) $feed = array_slice($feed, 0, MAX_ENTRIES);
-
     file_put_contents(FEED_DATA, json_encode($feed, JSON_PRETTY_PRINT));
-    echo json_encode(['ok' => true, 'total' => count($feed)]);
-    exit;
+    echo json_encode(['ok' => true, 'total' => count($feed)]); exit;
 }
 
-// ── GET: display ────────────────────────────────────────────────────────────
 $all    = file_exists(FEED_DATA) ? (json_decode(file_get_contents(FEED_DATA), true) ?: []) : [];
 $filter = $_GET['filter'] ?? 'all';
 $limit  = min((int)($_GET['limit'] ?? DEFAULT_LIMIT), MAX_ENTRIES);
-
 $entries = $all;
-if ($filter === 'shill') {
-    $entries = array_values(array_filter($entries, fn($e) => ($e['signal'] ?? '') === 'SHILL'));
-} elseif ($filter === 'pass') {
-    $entries = array_values(array_filter($entries, fn($e) => ($e['signal'] ?? '') === 'PASS'));
-}
-
+if ($filter === 'shill')     $entries = array_values(array_filter($entries, fn($e) => ($e['signal'] ?? '') === 'SHILL'));
+elseif ($filter === 'pass')  $entries = array_values(array_filter($entries, fn($e) => ($e['signal'] ?? '') === 'PASS'));
 $total   = count($all);
 $shown   = min($limit, count($entries));
 $entries = array_slice($entries, 0, $limit);
-
-$lastAt = $all[0]['engagedAt'] ?? $all[0]['receivedAt'] ?? null;
-$isLive = $lastAt && (time() - strtotime($lastAt)) < 3600;
+$lastAt  = $all[0]['engagedAt'] ?? $all[0]['receivedAt'] ?? null;
+$isLive  = $lastAt && (time() - strtotime($lastAt)) < 3600;
 
 function relTime(?string $iso): string {
     if (!$iso) return '';
     $d = time() - strtotime($iso);
     if ($d < 60)    return $d . 's ago';
-    if ($d < 3600)  return floor($d / 60)  . 'm ago';
-    if ($d < 86400) return floor($d / 3600) . 'h ago';
-    return floor($d / 86400) . 'd ago';
+    if ($d < 3600)  return floor($d/60)  . 'm ago';
+    if ($d < 86400) return floor($d/3600) . 'h ago';
+    return floor($d/86400) . 'd ago';
 }
-
-function fmtNum(?int $n): string {
-    if ($n === null) return '';
-    if ($n >= 1000000) return round($n / 1000000, 1) . 'M';
-    if ($n >= 1000)    return round($n / 1000, 1) . 'K';
+function fmtNum($n): string {
+    if ($n === null || $n === '') return '';
+    $n = (int)$n;
+    if ($n >= 1000000) return round($n/1000000, 1) . 'M';
+    if ($n >= 1000)    return round($n/1000, 1) . 'K';
     return (string)$n;
 }
 ?>
@@ -80,277 +58,315 @@ function fmtNum(?int $n): string {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
 <title>Signal Feed — aptum_</title>
+<meta name="description" content="High-signal posts from the crypto and web3 feed, curated by aptum_.">
+<meta property="og:title" content="Signal Feed — aptum_">
+<meta property="og:description" content="High-signal posts from the crypto and web3 feed, curated by aptum_.">
+<meta property="og:image" content="https://aptum.fun/feed-preview.png">
+<meta property="og:url" content="https://aptum.fun/feed">
+<meta property="og:type" content="website">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Signal Feed — aptum_">
+<meta name="twitter:description" content="High-signal posts from the crypto and web3 feed, curated by aptum_.">
+<meta name="twitter:image" content="https://aptum.fun/feed-preview.png">
+<meta name="twitter:site" content="@aptum_">
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=IBM+Plex+Mono:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --bg0: #ECEEF2; --bg1: #E4E7EC; --bg2: #FFFFFF; --bg3: #F5F6F9;
-  --bd:  rgba(10,12,16,.10); --bd2: rgba(10,12,16,.16); --bd3: rgba(10,12,16,.30);
-  --ink: #090B0F; --ink2: rgba(9,11,15,.86); --ink3: rgba(9,11,15,.58);
-  --ink4: rgba(9,11,15,.38); --ink5: rgba(9,11,15,.14);
-  --green: #0A7A3E; --greenbg: rgba(10,122,62,.07); --greenborder: rgba(10,122,62,.25);
-  --amber: #92400E; --amberbg: rgba(180,83,9,.07); --amberborder: rgba(146,64,14,.22);
+  --bg:    #ECEEF2;
+  --surf:  #FFFFFF;
+  --surf2: #F5F7FA;
+  --bd:    rgba(9,11,15,.09);
+  --bd2:   rgba(9,11,15,.16);
+  --bd3:   rgba(9,11,15,.28);
+  --ink:   #0A0C10;
+  --ink2:  rgba(10,12,16,.80);
+  --ink3:  rgba(10,12,16,.54);
+  --ink4:  rgba(10,12,16,.36);
+  --ink5:  rgba(10,12,16,.12);
+  --pass:  #0D9151;
+  --pass-bg:  rgba(13,145,81,.07);
+  --pass-bd:  rgba(13,145,81,.22);
+  --shill: #C2620A;
+  --shill-bg:  rgba(194,98,10,.07);
+  --shill-bd:  rgba(194,98,10,.22);
   --mono: 'IBM Plex Mono', monospace;
   --disp: 'Syne', sans-serif;
-  --radius: 2px;
-}
-@keyframes fadeUp { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:translateY(0) } }
-@keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:.25} }
-
-body { background: var(--bg0); color: var(--ink); font-family: var(--mono); min-height: 100vh; }
-
-.grid-bg {
-  position: fixed; inset: 0; z-index: 0; pointer-events: none;
-  background-image: linear-gradient(var(--bd) 1px, transparent 1px),
-                    linear-gradient(90deg, var(--bd) 1px, transparent 1px);
-  background-size: 40px 40px; opacity: .5;
+  --shadow-sm: 0 1px 3px rgba(9,11,15,.06), 0 1px 2px rgba(9,11,15,.04);
+  --shadow-md: 0 4px 16px rgba(9,11,15,.08), 0 1px 4px rgba(9,11,15,.05);
+  --shadow-lg: 0 8px 32px rgba(9,11,15,.12), 0 2px 8px rgba(9,11,15,.06);
 }
 
-/* ── Status Bar ── */
-.status-bar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 200;
-  height: 30px; background: var(--ink);
-  border-bottom: 1px solid rgba(255,255,255,.07);
-  display: flex; align-items: center; padding: 0 16px;
+@keyframes fadeUp { from { opacity:0; transform:translateY(6px) } to { opacity:1; transform:none } }
+@keyframes pulse  { 0%,100%{opacity:1} 50%{opacity:.2} }
+
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--ink); font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+
+/* grid */
+body::before {
+  content: ''; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    linear-gradient(var(--bd) 1px, transparent 1px),
+    linear-gradient(90deg, var(--bd) 1px, transparent 1px);
+  background-size: 40px 40px;
 }
-.si {
+
+/* ── Top bar ── */
+.topbar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 300;
+  height: 32px; background: var(--ink);
+  display: flex; align-items: center; gap: 0; padding: 0 0 0 1px;
+}
+.tb-item {
   display: flex; align-items: center; gap: 6px;
-  padding: 0 14px; height: 30px;
-  border-right: 1px solid rgba(255,255,255,.08);
-  color: rgba(255,255,255,.40); font-size: 10px; letter-spacing: .1em;
+  padding: 0 16px; height: 32px;
+  border-right: 1px solid rgba(255,255,255,.07);
+  font-size: 10px; letter-spacing: .1em; color: rgba(255,255,255,.35);
 }
-.si:first-child { border-left: 1px solid rgba(255,255,255,.08); }
-.sv { font-weight: 700; color: rgba(255,255,255,.85); }
-.dot { width: 5px; height: 5px; border-radius: 50%; flex-shrink: 0; }
-.dot.live { background: #4ade80; box-shadow: 0 0 6px rgba(74,222,128,.7); animation: pulse 2s infinite; }
-.dot.off  { background: rgba(255,255,255,.2); }
-#clock { font-size: 10px; color: rgba(255,255,255,.25); letter-spacing: .1em; margin-left: auto; }
+.tb-item:first-child { border-left: 1px solid rgba(255,255,255,.07); }
+.tb-val { font-weight: 700; color: rgba(255,255,255,.88); }
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+  background: #22c55e; box-shadow: 0 0 8px rgba(34,197,94,.6);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+.idle-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.18); }
+#tb-clock { font-size: 10px; color: rgba(255,255,255,.22); letter-spacing: .1em; margin-left: auto; padding-right: 16px; }
 
 /* ── Navbar ── */
 .navbar {
-  position: fixed; top: 30px; left: 0; right: 0; z-index: 100;
-  height: 48px; background: var(--bg2);
-  border-bottom: 2px solid var(--bd3);
+  position: fixed; top: 32px; left: 0; right: 0; z-index: 200;
+  height: 52px; background: rgba(255,255,255,.92); backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--bd2);
   display: flex; align-items: stretch;
-  box-shadow: 0 2px 16px rgba(10,12,16,.06);
+  box-shadow: var(--shadow-sm);
 }
-.brand {
-  display: flex; align-items: center; padding: 0 22px;
-  border-right: 2px solid var(--bd3); gap: 10px; text-decoration: none;
+.brand { display: flex; align-items: center; gap: 12px; padding: 0 24px; border-right: 1px solid var(--bd2); text-decoration: none; }
+.brand-name { font-family: var(--disp); font-size: 15px; font-weight: 800; letter-spacing: .16em; color: var(--ink); }
+.brand-pill {
+  font-size: 9px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
+  padding: 2px 8px; background: var(--ink); color: #fff;
 }
-.brand-name { font-family: var(--disp); font-size: 16px; font-weight: 800; letter-spacing: .14em; color: var(--ink); }
-.brand-badge { font-size: 10px; font-weight: 700; color: var(--bg2); letter-spacing: .12em; background: var(--ink); padding: 2px 8px; }
-.nav-right { margin-left: auto; display: flex; align-items: center; padding-right: 20px; }
-.nav-link { font-size: 10px; letter-spacing: .1em; text-transform: uppercase; color: var(--ink4); text-decoration: none; font-weight: 600; }
-.nav-link:hover { color: var(--ink); }
+.nav-end { margin-left: auto; display: flex; align-items: center; padding: 0 24px; gap: 20px; }
+.nav-a { font-size: 10px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--ink4); text-decoration: none; }
+.nav-a:hover { color: var(--ink); }
 
-/* ── Content ── */
-.content {
+/* ── Layout ── */
+.page {
   position: relative; z-index: 10;
-  margin-top: 78px; padding: 24px 16px 80px;
-  max-width: 680px; margin-left: auto; margin-right: auto;
+  max-width: 660px; margin: 0 auto;
+  padding: 108px 16px 80px;
 }
 
-/* ── Filter Bar ── */
-.filter-bar { display: flex; gap: 2px; margin-bottom: 20px; animation: fadeUp .3s both; }
-.filter-pill {
-  font-family: var(--mono); font-size: 10px; letter-spacing: .1em;
-  text-transform: uppercase; font-weight: 700; padding: 7px 16px;
-  border: 1px solid var(--bd2); background: var(--bg2); color: var(--ink4);
-  text-decoration: none; transition: all .15s;
+/* ── Filter bar ── */
+.filters { display: flex; gap: 2px; margin-bottom: 24px; animation: fadeUp .3s both; }
+.f-pill {
+  font-size: 10px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  padding: 8px 18px; text-decoration: none;
+  background: var(--surf); border: 1px solid var(--bd2); color: var(--ink4);
+  transition: background .12s, color .12s;
 }
-.filter-pill:hover  { background: var(--bg1); color: var(--ink2); }
-.filter-pill.active { background: var(--ink); color: var(--bg2); border-color: var(--ink); }
-.filter-count {
-  display: inline-flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: 700; margin-left: 6px;
-  padding: 1px 6px; min-width: 20px;
-  background: rgba(255,255,255,.18);
+.f-pill:hover { background: #F0F2F6; color: var(--ink2); }
+.f-pill.on { background: var(--ink); color: #fff; border-color: var(--ink); }
+.f-count {
+  margin-left: 7px; font-size: 9px; font-weight: 700;
+  padding: 1px 6px; display: inline-flex; align-items: center;
 }
-.filter-pill:not(.active) .filter-count { background: var(--bg0); color: var(--ink3); }
+.f-pill.on  .f-count { background: rgba(255,255,255,.15); }
+.f-pill:not(.on) .f-count { background: rgba(9,11,15,.06); color: var(--ink3); }
 
-/* ── Tweet Card ── */
-.tweet-card {
-  background: var(--bg2);
+/* ────────────────────────────────────────────
+   CARD
+──────────────────────────────────────────── */
+.card {
+  background: var(--surf);
   border: 1px solid var(--bd2);
-  border-left: 3px solid var(--bd3);
-  box-shadow: 0 1px 8px rgba(10,12,16,.04), 0 4px 20px rgba(10,12,16,.03);
-  margin-bottom: 12px;
-  animation: fadeUp .35s both;
-  transition: box-shadow .15s, transform .15s;
+  border-left-width: 2px;
+  box-shadow: var(--shadow-sm);
+  margin-bottom: 8px;
+  animation: fadeUp .3s both;
+  transition: box-shadow .18s, transform .18s;
+  overflow: hidden;
 }
-.tweet-card:hover { box-shadow: 0 4px 24px rgba(10,12,16,.10); transform: translateY(-1px); }
-.tweet-card:nth-child(2)  { animation-delay: .04s; }
-.tweet-card:nth-child(3)  { animation-delay: .08s; }
-.tweet-card:nth-child(4)  { animation-delay: .12s; }
-.tweet-card:nth-child(5)  { animation-delay: .15s; }
-.tweet-card.is-pass  { border-left-color: var(--green); }
-.tweet-card.is-shill { border-left-color: #D97706; }
+.card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.card:nth-child(1) { animation-delay: .00s; }
+.card:nth-child(2) { animation-delay: .04s; }
+.card:nth-child(3) { animation-delay: .08s; }
+.card:nth-child(4) { animation-delay: .11s; }
+.card:nth-child(5) { animation-delay: .14s; }
+.card.pass  { border-left-color: var(--pass); }
+.card.shill { border-left-color: var(--shill); }
 
-/* ── Card Header ── */
-.card-header {
+/* card header */
+.c-head {
   display: flex; align-items: center; gap: 10px;
-  padding: 12px 16px 10px;
-  border-bottom: 1px solid var(--bd);
+  padding: 10px 14px 9px;
 }
-.avatar {
-  width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
-  display: flex; align-items: center; justify-content: center;
-  font-size: 13px; font-weight: 700; letter-spacing: 0;
-  border: 1.5px solid var(--bd2);
+.pfp-wrap { position: relative; flex-shrink: 0; width: 28px; height: 28px; }
+.pfp-img {
+  width: 28px; height: 28px; border-radius: 50%;
+  object-fit: cover; display: block;
+  border: 1px solid var(--bd2); background: var(--surf2);
 }
-.is-pass  .avatar { background: var(--greenbg); color: var(--green); border-color: var(--greenborder); }
-.is-shill .avatar { background: var(--amberbg);  color: var(--amber); border-color: var(--amberborder); }
-.author-block { flex: 1; min-width: 0; }
-.author-name {
+.pfp-fallback {
+  position: absolute; inset: 0; border-radius: 50%;
+  display: none; align-items: center; justify-content: center;
+  font-size: 11px; font-weight: 700; letter-spacing: 0;
+  border: 1px solid var(--bd2);
+}
+.card.pass  .pfp-fallback { background: var(--pass-bg);  color: var(--pass);  border-color: var(--pass-bd); }
+.card.shill .pfp-fallback { background: var(--shill-bg); color: var(--shill); border-color: var(--shill-bd); }
+
+.c-author { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 8px; }
+.c-handle {
   font-size: 12px; font-weight: 700; color: var(--ink);
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  letter-spacing: .01em;
+  letter-spacing: .01em; line-height: 1; flex-shrink: 0;
 }
-.author-meta {
-  display: flex; align-items: center; gap: 8px; margin-top: 2px; flex-wrap: wrap;
-}
-.author-time { font-size: 9.5px; color: var(--ink4); letter-spacing: .04em; }
-.header-badges { display: flex; gap: 4px; flex-wrap: wrap; align-items: center; margin-left: auto; }
+.c-time { font-size: 9.5px; color: var(--ink4); letter-spacing: .02em; }
 
-/* ── Badges ── */
-.badge {
-  display: inline-flex; align-items: center;
-  font-size: 8.5px; letter-spacing: .1em; text-transform: uppercase;
-  padding: 2px 7px; font-weight: 700; flex-shrink: 0;
+/* right side of header */
+.c-signal { display: flex; align-items: center; gap: 4px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end; }
+.sig-label {
+  font-size: 8px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  padding: 2px 7px; border: 1px solid;
 }
-.badge-shill { background: var(--amberbg);  color: var(--amber); border: 1px solid var(--amberborder); }
-.badge-pass  { background: var(--greenbg);  color: var(--green); border: 1px solid var(--greenborder); }
-.badge-topic { background: var(--bg0); color: var(--ink3); border: 1px solid var(--bd2); font-weight: 500; }
+.card.pass  .sig-label { color: var(--pass);  background: var(--pass-bg);  border-color: var(--pass-bd); }
+.card.shill .sig-label { color: var(--shill); background: var(--shill-bg); border-color: var(--shill-bd); }
+.sig-chip {
+  font-size: 8px; font-weight: 500; letter-spacing: .07em; text-transform: uppercase;
+  padding: 2px 7px; border: 1px solid var(--bd2);
+  background: var(--surf2); color: var(--ink3);
+}
 
-/* ── Tweet Body ── */
-.tweet-body { padding: 14px 16px 12px; }
-.tweet-text {
-  font-size: 13.5px; line-height: 1.65; color: var(--ink2);
+/* divider */
+.c-div { height: 1px; background: var(--bd); }
+
+/* card body */
+.c-body { padding: 10px 14px 8px; }
+.c-text {
+  font-size: 12.5px; line-height: 1.62; color: var(--ink2);
   white-space: pre-wrap; word-break: break-word; font-weight: 400;
 }
 
-/* ── Images ── */
-.tweet-images { display: flex; gap: 5px; margin-top: 12px; border-radius: var(--radius); overflow: hidden; }
-.tweet-images img {
-  flex: 1 1 0; min-width: 0; max-height: 280px;
-  object-fit: cover; display: block;
-  border: 1px solid var(--bd); background: var(--bg1);
+/* images */
+.c-imgs { display: flex; gap: 3px; margin-top: 8px; overflow: hidden; background: var(--surf2); }
+.c-imgs img {
+  flex: 1 1 0; min-width: 0; max-height: 200px;
+  object-fit: cover; display: block; border: none;
 }
-.tweet-images img:only-child { max-height: 340px; }
+.c-imgs img:only-child { max-height: 240px; }
 
-/* ── Stats row ── */
-.tweet-stats {
-  display: flex; align-items: center; gap: 16px;
-  margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--bd);
+/* stats + link row */
+.c-foot {
+  display: flex; align-items: center;
+  padding: 7px 14px 9px;
 }
-.tweet-stat { display: flex; align-items: center; gap: 5px; }
-.tweet-stat svg { opacity: .35; flex-shrink: 0; }
-.stat-val { font-size: 11px; font-weight: 600; color: var(--ink3); letter-spacing: .02em; }
-.stat-label { font-size: 9px; color: var(--ink4); letter-spacing: .06em; text-transform: uppercase; }
-.tweet-xlink {
-  margin-left: auto; font-size: 9px; font-weight: 700; letter-spacing: .1em;
-  text-transform: uppercase; color: var(--ink4); text-decoration: none;
-  padding: 4px 10px; border: 1px solid var(--bd2); background: var(--bg0);
-  transition: all .15s;
+.c-stats { display: flex; align-items: center; gap: 12px; flex: 1; }
+.c-stat  { display: flex; align-items: center; gap: 4px; }
+.c-stat svg { color: var(--ink5); flex-shrink: 0; }
+.c-stat-n { font-size: 11px; font-weight: 600; color: var(--ink3); }
+.c-xbtn {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+  color: var(--ink4); text-decoration: none;
+  padding: 4px 10px; border: 1px solid var(--bd2); background: var(--surf2);
+  transition: all .14s; white-space: nowrap; flex-shrink: 0;
 }
-.tweet-xlink:hover { background: var(--ink); color: #fff; border-color: var(--ink); }
+.c-xbtn:hover { background: var(--ink); color: #fff; border-color: var(--ink); }
 
-/* ── Reply section ── */
-.reply-section {
+/* reply block */
+.c-reply {
   border-top: 1px solid var(--bd);
-  padding: 10px 16px 12px;
-  background: var(--bg3);
+  padding: 8px 14px 10px 16px;
+  background: var(--surf2);
   position: relative;
 }
-.reply-section::before {
-  content: '';
-  position: absolute; left: 0; top: 0; bottom: 0; width: 2px;
-  background: var(--ink5);
+.c-reply::before {
+  content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+  width: 2px; background: var(--ink5);
 }
-.reply-label {
-  font-size: 8.5px; letter-spacing: .14em; text-transform: uppercase;
-  font-weight: 700; color: var(--ink4); margin-bottom: 6px;
-  display: flex; align-items: center; gap: 6px;
+.c-reply-label {
+  font-size: 8.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase;
+  color: var(--ink4); margin-bottom: 4px; display: flex; align-items: center; gap: 4px;
 }
-.reply-label::before { content: '↳'; font-style: normal; opacity: .5; }
-.reply-text {
-  font-size: 12px; color: var(--ink2); line-height: 1.6;
+.c-reply-label svg { opacity: .4; }
+.c-reply-text {
+  font-size: 11.5px; color: var(--ink2); line-height: 1.6;
   font-style: italic; letter-spacing: .01em;
 }
-.reply-link {
+.c-reply-link {
   display: inline-block; margin-top: 7px;
-  font-size: 9px; color: var(--ink4); text-decoration: none;
-  letter-spacing: .06em; font-weight: 600;
+  font-size: 9px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--ink4); text-decoration: none;
 }
-.reply-link:hover { color: var(--ink); }
+.c-reply-link:hover { color: var(--ink); }
 
 /* ── Empty ── */
-.empty { text-align: center; padding: 80px 20px; color: var(--ink4); font-size: 12px; letter-spacing: .06em; }
-.empty-icon { font-size: 28px; margin-bottom: 12px; opacity: .25; }
+.empty { text-align: center; padding: 100px 20px; color: var(--ink4); font-size: 12px; letter-spacing: .06em; }
+.empty-mark { font-size: 24px; opacity: .2; margin-bottom: 14px; }
 
 /* ── Footer ── */
-.feed-footer { text-align: center; padding: 20px 0; font-size: 10px; color: var(--ink4); letter-spacing: .06em; }
-.feed-footer a { color: var(--ink3); text-decoration: none; }
-.feed-footer a:hover { color: var(--ink); }
+.foot { text-align: center; padding: 28px 0 0; font-size: 10px; color: var(--ink4); letter-spacing: .06em; }
+.foot a { color: var(--ink3); text-decoration: none; }
+.foot a:hover { color: var(--ink); }
 </style>
 </head>
 <body>
 
-<div class="grid-bg"></div>
-
-<!-- Status Bar -->
-<div class="status-bar">
-  <div class="si">
-    <span class="dot <?= $isLive ? 'live' : 'off' ?>"></span>
-    <span class="sv"><?= $isLive ? 'LIVE' : 'IDLE' ?></span>
+<!-- Top bar -->
+<div class="topbar">
+  <div class="tb-item">
+    <?php if ($isLive): ?><span class="live-dot"></span><span class="tb-val">LIVE</span>
+    <?php else: ?><span class="idle-dot"></span><span class="tb-val">IDLE</span><?php endif; ?>
   </div>
-  <div class="si"><span>TOTAL</span><span class="sv"><?= $total ?></span></div>
-  <div class="si"><span>SHOWING</span><span class="sv"><?= $shown ?></span></div>
+  <div class="tb-item"><span>SIGNALS</span><span class="tb-val"><?= $total ?></span></div>
+  <div class="tb-item"><span>SHOWING</span><span class="tb-val"><?= $shown ?></span></div>
   <?php if ($lastAt): ?>
-  <div class="si"><span>LAST</span><span class="sv"><?= relTime($lastAt) ?></span></div>
+  <div class="tb-item"><span>LAST</span><span class="tb-val"><?= relTime($lastAt) ?></span></div>
   <?php endif; ?>
-  <span id="clock"></span>
+  <span id="tb-clock"></span>
 </div>
 
 <!-- Navbar -->
 <div class="navbar">
   <a class="brand" href="/feed">
     <span class="brand-name">APTUM</span>
-    <span class="brand-badge">FEED</span>
+    <span class="brand-pill">FEED</span>
   </a>
-  <div class="nav-right">
-    <a href="https://x.com/aptum_" target="_blank" class="nav-link">@aptum_</a>
+  <div class="nav-end">
+    <a href="https://x.com/aptum_" target="_blank" class="nav-a">@aptum_</a>
   </div>
 </div>
 
-<!-- Content -->
-<div class="content">
+<!-- Page -->
+<div class="page">
 
-  <!-- Filter Bar -->
+  <!-- Filters -->
   <?php
-  $shillCount = count(array_filter($all, fn($e) => ($e['signal'] ?? '') === 'SHILL'));
-  $passCount  = count(array_filter($all, fn($e) => ($e['signal'] ?? '') === 'PASS'));
+  $sc = count(array_filter($all, fn($e) => ($e['signal']??'') === 'SHILL'));
+  $pc = count(array_filter($all, fn($e) => ($e['signal']??'') === 'PASS'));
   ?>
-  <div class="filter-bar">
-    <a href="?filter=all"   class="filter-pill <?= $filter==='all'   ? 'active' : '' ?>">All<span   class="filter-count"><?= $total ?></span></a>
-    <a href="?filter=pass"  class="filter-pill <?= $filter==='pass'  ? 'active' : '' ?>">Pass<span  class="filter-count"><?= $passCount ?></span></a>
-    <a href="?filter=shill" class="filter-pill <?= $filter==='shill' ? 'active' : '' ?>">Shill<span class="filter-count"><?= $shillCount ?></span></a>
+  <div class="filters">
+    <a href="?filter=all"   class="f-pill <?= $filter==='all'   ? 'on':'' ?>">All<span   class="f-count"><?= $total ?></span></a>
+    <a href="?filter=pass"  class="f-pill <?= $filter==='pass'  ? 'on':'' ?>">Pass<span  class="f-count"><?= $pc ?></span></a>
+    <a href="?filter=shill" class="f-pill <?= $filter==='shill' ? 'on':'' ?>">Shill<span class="f-count"><?= $sc ?></span></a>
   </div>
 
-  <!-- Feed -->
+  <!-- Cards -->
   <?php if (empty($entries)): ?>
     <div class="empty">
-      <div class="empty-icon">◎</div>
-      No signals yet<?= $filter !== 'all' ? ' for this filter' : '' ?>.
+      <div class="empty-mark">◎</div>
+      No signals yet<?= $filter!=='all' ? ' for this filter' : '' ?>.
     </div>
-  <?php else: foreach ($entries as $i => $e):
-    $tweetId   = htmlspecialchars($e['id']     ?? '');
-    $author    = htmlspecialchars($e['author'] ?? '');
+
+  <?php else: foreach ($entries as $e):
+    $tweetId   = htmlspecialchars($e['id']      ?? '');
+    $author    = htmlspecialchars($e['author']  ?? '');
     $signal    = $e['signal'] ?? 'PASS';
-    $topic     = htmlspecialchars($e['topic']  ?? '');
-    $tone      = htmlspecialchars($e['tone']   ?? '');
-    $reply     = htmlspecialchars($e['reply']  ?? '');
+    $topic     = $e['topic']  ?? '';
+    $tone      = $e['tone']   ?? '';
+    $reply     = htmlspecialchars($e['reply']   ?? '');
     $replyUrl  = htmlspecialchars($e['replyUrl'] ?? '');
     $time      = $e['engagedAt'] ?? $e['receivedAt'] ?? '';
     $tweetUrl  = "https://x.com/{$author}/status/{$tweetId}";
@@ -358,106 +374,121 @@ body { background: var(--bg0); color: var(--ink); font-family: var(--mono); min-
     $imageUrls = is_array($e['imageUrls'] ?? null) ? $e['imageUrls'] : [];
     $stats     = is_array($e['stats']     ?? null) ? $e['stats']     : null;
     $isShill   = $signal === 'SHILL';
-    $cardClass = $isShill ? 'is-shill' : 'is-pass';
-    $avatarChar = strtoupper(substr($author, 0, 1)) ?: '?';
+    $cls       = $isShill ? 'shill' : 'pass';
+    $initial   = strtoupper(substr($author, 0, 1)) ?: '?';
+    $pfpUrl    = "https://unavatar.io/x/" . urlencode($author);
+
+    // build meta chips (skip empty / literal 'unknown')
+    $tags = array_filter(
+        array_map('trim', [$topic, $tone]),
+        fn($t) => $t !== '' && $t !== 'unknown'
+    );
   ?>
-  <div class="tweet-card <?= $cardClass ?>">
+
+  <div class="card <?= $cls ?>">
 
     <!-- Header -->
-    <div class="card-header">
-      <div class="avatar"><?= $avatarChar ?></div>
-      <div class="author-block">
-        <div class="author-name">@<?= $author ?></div>
-        <div class="author-meta">
-          <span class="author-time"><?= relTime($time) ?></span>
-        </div>
+    <div class="c-head">
+      <div class="pfp-wrap">
+        <img class="pfp-img" src="<?= htmlspecialchars($pfpUrl) ?>" alt=""
+             onerror="this.style.display='none'; this.nextElementSibling.style.display='flex'">
+        <div class="pfp-fallback"><?= $initial ?></div>
       </div>
-      <div class="header-badges">
-        <?php if ($isShill): ?>
-          <span class="badge badge-shill">SHILL</span>
-        <?php else: ?>
-          <span class="badge badge-pass">PASS</span>
-        <?php endif; ?>
-        <?php if ($topic && $topic !== 'unknown'): ?><span class="badge badge-topic"><?= $topic ?></span><?php endif; ?>
-        <?php if ($tone  && $tone  !== 'unknown'): ?><span class="badge badge-topic"><?= $tone  ?></span><?php endif; ?>
+
+      <div class="c-author">
+        <span class="c-handle">@<?= $author ?></span>
+        <span class="c-time"><?= relTime($time) ?></span>
+      </div>
+
+      <div class="c-signal">
+        <span class="sig-label"><?= $isShill ? 'SHILL' : 'PASS' ?></span>
+        <?php foreach ($tags as $tag): ?>
+          <span class="sig-chip"><?= htmlspecialchars($tag) ?></span>
+        <?php endforeach; ?>
       </div>
     </div>
 
+    <div class="c-div"></div>
+
     <!-- Body -->
-    <div class="tweet-body">
+    <div class="c-body">
       <?php if ($tweetText): ?>
-      <div class="tweet-text"><?= $tweetText ?></div>
+      <div class="c-text"><?= $tweetText ?></div>
       <?php endif; ?>
 
       <?php if (!empty($imageUrls)): ?>
-      <div class="tweet-images">
-        <?php foreach (array_slice($imageUrls, 0, 2) as $imgUrl):
-          $safeImg = htmlspecialchars(preg_replace('/\?.*$/', '', $imgUrl) . '?format=jpg&name=medium');
+      <div class="c-imgs">
+        <?php foreach (array_slice($imageUrls, 0, 2) as $img):
+          $imgSrc = htmlspecialchars(preg_replace('/\?.*$/', '', $img) . '?format=jpg&name=medium');
         ?>
-          <img src="<?= $safeImg ?>" alt="" loading="lazy" onerror="this.parentNode.removeChild(this)">
+          <img src="<?= $imgSrc ?>" alt="" loading="lazy"
+               onerror="this.parentNode.children.length===1 ? this.parentNode.remove() : this.remove()">
         <?php endforeach; ?>
       </div>
       <?php endif; ?>
+    </div>
 
-      <div class="tweet-stats">
-        <?php if ($stats && isset($stats['replies']) && $stats['replies'] !== null): ?>
-        <span class="tweet-stat">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          <span class="stat-val"><?= fmtNum($stats['replies']) ?></span>
+    <!-- Footer: stats + link -->
+    <div class="c-foot">
+      <div class="c-stats">
+        <?php if ($stats && isset($stats['replies'])  && $stats['replies']  !== null): ?>
+        <span class="c-stat">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+          <span class="c-stat-n"><?= fmtNum($stats['replies']) ?></span>
         </span>
         <?php endif; ?>
-        <?php if ($stats && isset($stats['reposts']) && $stats['reposts'] !== null): ?>
-        <span class="tweet-stat">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-          <span class="stat-val"><?= fmtNum($stats['reposts']) ?></span>
+        <?php if ($stats && isset($stats['reposts'])  && $stats['reposts']  !== null): ?>
+        <span class="c-stat">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          <span class="c-stat-n"><?= fmtNum($stats['reposts']) ?></span>
         </span>
         <?php endif; ?>
-        <?php if ($stats && isset($stats['likes']) && $stats['likes'] !== null): ?>
-        <span class="tweet-stat">
-          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
-          <span class="stat-val"><?= fmtNum($stats['likes']) ?></span>
+        <?php if ($stats && isset($stats['likes'])    && $stats['likes']    !== null): ?>
+        <span class="c-stat">
+          <svg width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.7" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          <span class="c-stat-n"><?= fmtNum($stats['likes']) ?></span>
         </span>
         <?php endif; ?>
-        <a href="<?= $tweetUrl ?>" target="_blank" class="tweet-xlink">↗ X</a>
       </div>
+      <a href="<?= $tweetUrl ?>" target="_blank" class="c-xbtn">↗ View on X</a>
     </div>
 
     <!-- Reply -->
     <?php if ($reply): ?>
-    <div class="reply-section">
-      <div class="reply-label">aptum_ replied</div>
-      <div class="reply-text"><?= $reply ?></div>
-      <?php if ($replyUrl): ?>
-        <a href="<?= $replyUrl ?>" target="_blank" class="reply-link">view reply on X →</a>
-      <?php endif; ?>
+    <div class="c-reply">
+      <div class="c-reply-label">
+        <svg width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
+        aptum_ replied
+      </div>
+      <div class="c-reply-text"><?= $reply ?></div>
     </div>
     <?php endif; ?>
 
   </div>
   <?php endforeach; endif; ?>
 
-  <!-- Footer -->
+  <!-- Load more -->
   <?php if ($total > $shown): ?>
-  <div class="feed-footer">
+  <div class="foot">
     Showing <?= $shown ?> of <?= $total ?> —
-    <a href="?filter=<?= htmlspecialchars($filter) ?>&limit=<?= min($limit + 50, MAX_ENTRIES) ?>">load 50 more</a>
+    <a href="?filter=<?= htmlspecialchars($filter) ?>&limit=<?= min($limit+50, MAX_ENTRIES) ?>">Load 50 more</a>
   </div>
   <?php else: ?>
-  <div class="feed-footer">All <?= $shown ?> signal<?= $shown !== 1 ? 's' : '' ?> loaded</div>
+  <div class="foot">All <?= $shown ?> signal<?= $shown!==1?'s':'' ?> loaded · <a href="?filter=<?= htmlspecialchars($filter) ?>">Refresh</a></div>
   <?php endif; ?>
 
 </div>
 
 <script>
-function updateClock() {
-  const d = new Date();
-  document.getElementById('clock').textContent =
-    d.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
-}
-updateClock();
-setInterval(updateClock, 1000);
-setInterval(() => location.reload(), 60000);
+(function() {
+  function clock() {
+    const d = new Date();
+    document.getElementById('tb-clock').textContent =
+      d.toLocaleTimeString('en-US', { hour12:false, hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  }
+  clock(); setInterval(clock, 1000);
+  setInterval(() => location.reload(), 60000);
+})();
 </script>
-
 </body>
 </html>

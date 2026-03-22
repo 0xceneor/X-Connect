@@ -4,10 +4,16 @@
 
 RewriteEngine On
 
-# aptum.fun/feed  →  feed.php (no .php in URL)
-RewriteRule ^feed/?$  /feed.php  [L]
+# aptum.fun/feed  →  feed.php
+RewriteRule ^feed/?$      /feed.php      [L]
 
-# Block direct access to feed-data.json
+# aptum.fun/evaluate  →  evaluate.php
+RewriteRule ^evaluate/?$  /evaluate.php  [L]
+
+# Block direct access to data files
 <Files "feed-data.json">
     Require all denied
 </Files>
+<FilesMatch "^evaluations/">
+    Require all denied
+</FilesMatch>
