@@ -15,7 +15,7 @@ if (!is_dir(EVAL_DIR)) mkdir(EVAL_DIR, 0755, true);
 if (($_GET['proxy'] ?? '') === '1') {
     $raw = $_GET['imgurl'] ?? '';
     // Only allow twitter/x avatar hosts
-    if (!preg_match('#^https://[a-z0-9.\-]*(twimg\.com|unavatar\.io)/#i', $raw)) {
+    if (!preg_match('#^https://[a-z0-9.\-]*(twimg\.com|unavatar\.io|abs\.twimg\.com|pbs\.twimg\.com)/#i', $raw)) {
         http_response_code(403); exit;
     }
     $img = @file_get_contents($raw, false, stream_context_create([
@@ -354,7 +354,7 @@ body::before {
     <div class="eval-header">
       <div class="eval-header-banner" style="background:linear-gradient(135deg,<?= $sc ?> 0%,#0A0C10 70%)"></div>
       <div class="eval-header-body">
-        <img class="eval-pfp" src="https://unavatar.io/x/<?= urlencode($evalData['username']) ?>" alt="" onerror="this.style.opacity='.2'">
+        <img class="eval-pfp" src="<?= htmlspecialchars($pr['pfpUrl'] ?? 'https://unavatar.io/x/' . urlencode($evalData['username'])) ?>" alt="" onerror="this.src='https://unavatar.io/x/<?= urlencode($evalData['username']) ?>';this.onerror=function(){this.style.opacity='.2'}">
         <div class="eval-info">
           <div class="eval-handle">
             @<?= htmlspecialchars($evalData['username']) ?>
@@ -466,8 +466,8 @@ body::before {
     $cardGrade      = $ev['grade'] ?? '';
     $cardNiche      = strtoupper($ev['niche'] ?? '');
     $cardDate       = date('M j, Y', strtotime($evalData['scannedAt'] ?? 'now'));
-    $rawPfp         = 'https://unavatar.io/x/' . urlencode($cardUsername);
-    $pfpProxy       = '/evaluate?proxy=1&imgurl=' . urlencode($rawPfp);
+    $rawPfp   = $pr['pfpUrl'] ?? ('https://unavatar.io/x/' . urlencode($cardUsername));
+    $pfpProxy = '/evaluate?proxy=1&imgurl=' . urlencode($rawPfp);
   ?>
   <!-- ── SHARE CARD 1080×1080 ── -->
   <div id="share-card" style="

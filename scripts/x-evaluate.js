@@ -210,24 +210,45 @@ async function scrapeProfile(page, uname) {
         const location = getText('[data-testid="UserLocation"]');
         const joinDate  = getText('[data-testid="UserJoinDate"]');
 
-        // Stats — find spans with follower/following text
-        const statEls = Array.from(document.querySelectorAll('a[href*="/followers"] span, a[href*="/following"] span'));
-        let followers = null, following = null;
-        document.querySelectorAll('a[href$="/verified_followers"], a[href$="/followers"]').forEach(a => {
-            const n = a.querySelector('span[dir="auto"] > span');
-            if (n) followers = n.innerText.trim();
+        // Stats — robust multi-strategy extraction
+        let followers = null, following = null, tweetCount = null;
+        const firstNum = el => {
+            if (!el) return null;
+            for (const s of Array.from(el.querySelectorAll('span'))) {
+                const t = s.innerText?.trim();
+                if (t && /^[\d,.]+[KkMm]?$/.test(t) && t !== '0' || /^\d+$/.test(t)) return t;
+            }
+            return null;
+        };
+        document.querySelectorAll('a[href*="/followers"]').forEach(a => {
+            if (followers) return;
+            const n = firstNum(a);
+            if (n) followers = n;
         });
-        document.querySelectorAll('a[href$="/following"]').forEach(a => {
-            const n = a.querySelector('span[dir="auto"] > span');
-            if (n) following = n.innerText.trim();
+        document.querySelectorAll('a[href*="/following"]').forEach(a => {
+            if (following) return;
+            const href = a.getAttribute('href') || '';
+            if (href.includes('/followers')) return; // skip verified_followers link
+            const n = firstNum(a);
+            if (n) following = n;
         });
 
-        // tweet count from header
+        // tweet count from header or profile stats area
         const headerText = getText('[data-testid="primaryColumn"] h2');
-        let tweetCount = null;
         if (headerText) {
-            const m = headerText.match(/([\d,KkMm.]+)\s+[Pp]ost/);
+            const m = headerText.match(/([\d,.]+[KkMm]?)\s+[Pp]ost/);
             if (m) tweetCount = m[1];
+        }
+        if (!tweetCount) {
+            // fallback: look for "posts" text near a number in profile
+            document.querySelectorAll('[data-testid="UserProfileHeader_Items"] span, [data-testid="primaryColumn"] span').forEach(s => {
+                if (tweetCount) return;
+                const t = s.innerText?.trim();
+                if (t && /^[\d,.]+[KkMm]?$/.test(t)) {
+                    const next = s.parentElement?.innerText?.toLowerCase();
+                    if (next && next.includes('post')) tweetCount = t;
+                }
+            });
         }
 
         // profile pic + banner
