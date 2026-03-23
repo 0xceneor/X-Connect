@@ -132,8 +132,11 @@ $aR  = (int)hexdec(substr($hex, 0, 2));
 $aG  = (int)hexdec(substr($hex, 2, 2));
 $aB  = (int)hexdec(substr($hex, 4, 2));
 
-// rarity label font size: shrink for longer words so it fits in 70px column
-$rarityFontPx = strlen($rarity) >= 9 ? 9 : (strlen($rarity) >= 7 ? 11 : 14);
+// rarity label font size: shrink for longer words so it fits in ~56px usable space
+$rarityFontPx = strlen($rarity) >= 9 ? 6.5 : (strlen($rarity) >= 7 ? 9 : 13);
+// title font size: shrink for longer archetype titles
+$titleLen     = strlen($cardTitle ?: $cardDisplay ?: '@'.$cardUsername);
+$titleFontPx  = $titleLen > 22 ? 9 : ($titleLen > 16 ? 10.5 : 12);
 
 $initials = strtoupper(substr($cardDisplay ?: $cardUsername, 0, 1) . (strlen($cardDisplay ?: $cardUsername) > 1 ? substr(str_replace(' ','', $cardDisplay ?: $cardUsername), 1, 1) : ''));
 $dims5    = array_slice(array_values($ev['dimensions'] ?? []), 0, 5);
@@ -250,7 +253,7 @@ body{background:#080A0F;margin:0;padding:0;width:400px;height:500px;overflow:hid
 .mini-lbl{font-family:var(--mono);font-size:5px;letter-spacing:0.08em;text-transform:uppercase;color:var(--t4);flex-shrink:0;width:22px;}
 .mini-track{flex:1;height:1.5px;background:rgba(255,255,255,0.07);border-radius:1px;}
 .mini-fill{height:100%;border-radius:1px;background:rgba(var(--aR),var(--aG),var(--aB),0.65);}
-.bb-right{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;background:rgba(255,255,255,0.02);position:relative;z-index:1;padding:0 6px;overflow:hidden;}
+.bb-right{display:flex;flex-direction:column;justify-content:center;align-items:center;gap:4px;background:rgba(255,255,255,0.02);position:relative;z-index:1;padding:0 3px;overflow:hidden;}
 .bb-rarity{font-family:var(--ui);font-weight:800;letter-spacing:0.02em;line-height:1;text-align:center;white-space:nowrap;overflow:hidden;max-width:100%;color:var(--t1);}
 .bb-tier{display:flex;align-items:stretch;border:1px solid var(--border-dim);border-radius:1px;overflow:hidden;width:100%;}
 .bb-tier-bar{width:2px;flex-shrink:0;background:rgba(255,255,255,0.20);}
@@ -363,7 +366,7 @@ body{background:#080A0F;margin:0;padding:0;width:400px;height:500px;overflow:hid
     <div class="bottom-bar">
       <div class="bb-left">
         <div class="bb-brand">APTUM.FUN</div>
-        <div class="bb-title"><?= htmlspecialchars($cardTitle ?: $cardDisplay ?: '@'.$cardUsername) ?></div>
+        <div class="bb-title" style="font-size:<?= $titleFontPx ?>px;"><?= htmlspecialchars($cardTitle ?: $cardDisplay ?: '@'.$cardUsername) ?></div>
         <div class="bb-sub"><?= htmlspecialchars($cardSubtitle ?: 'aptum.fun/evaluate') ?></div>
       </div>
       <div class="bb-mid">
