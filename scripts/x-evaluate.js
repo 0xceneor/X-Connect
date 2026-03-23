@@ -121,72 +121,135 @@ async function describeVisuals(pfpUrl, bannerUrl) {
 
 // ── Kimi-K2: full account evaluation ────────────────────────────────────────
 async function evaluateAccount(profile, tweets, visualDesc) {
-    const tweetSample = tweets.slice(0, 15).map((t, i) =>
-        `${i + 1}. "${t.text.substring(0, 160)}" [❤️${t.likes ?? '?'} 🔁${t.reposts ?? '?'} 💬${t.replies ?? '?'}]`
+    const tweetSample = tweets.slice(0, 20).map((t, i) =>
+        `${i + 1}. "${t.text.substring(0, 200)}" [❤️${t.likes ?? '?'} 🔁${t.reposts ?? '?'} 💬${t.replies ?? '?'}]`
     ).join('\n');
 
-    const avgLikes   = tweets.length ? Math.round(tweets.reduce((s, t) => s + (t.likes || 0), 0) / tweets.length) : 0;
-    const avgReposts = tweets.length ? Math.round(tweets.reduce((s, t) => s + (t.reposts || 0), 0) / tweets.length) : 0;
+    const avgLikes   = tweets.length ? (tweets.reduce((s, t) => s + (t.likes || 0), 0) / tweets.length).toFixed(1) : 0;
+    const avgReposts = tweets.length ? (tweets.reduce((s, t) => s + (t.reposts || 0), 0) / tweets.length).toFixed(1) : 0;
+    const avgReplies = tweets.length ? (tweets.reduce((s, t) => s + (t.replies || 0), 0) / tweets.length).toFixed(1) : 0;
 
-    const prompt = `You are an expert X (Twitter) account analyst. Evaluate this account and return ONLY valid JSON — no markdown, no backticks.
+    // Proxy weighted ER (no impressions — estimate impressions ≈ followers × 8%)
+    const followersN = parseStatNum(profile.followers) || 1000;
+    const estImpressions = followersN * 0.08;
+    const weightedER = tweets.length
+        ? ((avgLikes * 1 + avgReposts * 20 + avgReplies * 13.5) / estImpressions * 100).toFixed(2)
+        : null;
+
+    const SYSTEM = `You are an elite X (formerly Twitter) Account Intelligence Analyst in March 2026. Your evaluations are known for exceptional depth, data precision, and brutally honest, life-changing feedback. You treat data as the ultimate competitive edge.
+
+CORE 2026 REALITIES (apply relentlessly):
+• Grok/xAI transformer (fully live Jan 2026) semantically reads every post for relevance, insight density, emotional tone, and constructive value. Weights: early engagement velocity (first 15–60 min critical), reply depth, bookmarks (10×), replies (13.5×), reposts (20×), dwell time. Negativity/polarization heavily penalized.
+• Premium/Verified accounts: 2–4× visibility multiplier. External links: 30–50% reach drop.
+• Median ER benchmarks: Micro <5K: Good 2–5%, Excellent >5% | Small/Mid 5K–50K: Good 1–3%, Excellent >4% | Large 50K–500K: Good 0.5–2%, Excellent >2% | Massive >500K: Good 0.2–1%, Excellent >1%
+• Optimal posting: 3–7/day baseline, up to 8–10/day viable for high-signal KOLs if spaced 1–3h and velocity stable. Bursts <30 min trigger suppression.
+• Weighted ER = [(Likes×1)+(Reposts×20)+(Replies×13.5)+(Quotes×15)+(Bookmarks×10)] / Impressions × 100
+• Account Types: Brand (corporate/product), KOL/Influencer (sponsorships/affiliates), Creator/Individual (organic/community)
+
+Return ONLY valid JSON — no markdown, no backticks, no commentary outside JSON.`;
+
+    const USER = `Evaluate this X account using the 2026 Intelligence Framework. Return ONLY the JSON structure below.
 
 ACCOUNT DATA:
-- Handle: @${profile.username}
-- Display Name: ${profile.displayName || 'not set'}
-- Bio: ${profile.bio || 'empty'}
-- Website: ${profile.website || 'none'}
-- Location: ${profile.location || 'none'}
-- Followers: ${profile.followers ?? 'unknown'}
-- Following: ${profile.following ?? 'unknown'}
-- Total Tweets: ${profile.tweetCount ?? 'unknown'}
-- Joined: ${profile.joinDate || 'unknown'}
-- Pinned tweet: ${profile.pinnedTweet || 'none'}
-- Visual assessment: ${visualDesc || 'not available'}
-- Avg likes per post: ${avgLikes}
-- Avg reposts per post: ${avgReposts}
+Handle: @${profile.username} | Display: ${profile.displayName || 'not set'} | Bio: ${profile.bio || 'empty'}
+Website: ${profile.website || 'none'} | Location: ${profile.location || 'none'} | Joined: ${profile.joinDate || 'unknown'}
+Followers: ${profile.followers ?? 'unknown'} | Following: ${profile.following ?? 'unknown'} | Total Posts: ${profile.tweetCount ?? 'unknown'}
+Pinned: ${profile.pinnedTweet?.substring(0, 120) || 'none'} | Visual: ${visualDesc || 'not available'}
+Sample avg: ❤️${avgLikes} 🔁${avgReposts} 💬${avgReplies} per post | Est. weighted ER: ${weightedER ?? 'unknown'}% (proxy: followers×8% impressions)
 
-RECENT TWEETS (sample):
+RECENT POSTS (${tweets.length} collected):
 ${tweetSample || 'none available'}
 
-Evaluate across these 5 dimensions (score 1-10) and return this exact JSON structure:
+OUTPUT this exact JSON (no other text):
 {
-  "overall": <number 1-10 with one decimal>,
+  "overall": <number 1.0–10.0, one decimal — weighted average of all 5 dimension scores>,
   "grade": <"A+" | "A" | "B+" | "B" | "C" | "D" | "F">,
-  "summary": <2-3 sentence overall assessment>,
-  "niche": <detected primary niche/topic in 2-4 words>,
+  "summary": <2–3 sentence brutally honest assessment citing specific data points>,
+  "niche": <primary niche in 2–4 words>,
   "dimensions": {
-    "profile_setup":     { "score": <1-10>, "label": "Profile Setup",     "good": [<up to 2 things done well>], "fix": [<up to 3 specific improvements>] },
-    "content_quality":   { "score": <1-10>, "label": "Content Quality",   "good": [<up to 2 things done well>], "fix": [<up to 3 specific improvements>] },
-    "niche_authority":   { "score": <1-10>, "label": "Niche Authority",   "good": [<up to 2 things done well>], "fix": [<up to 3 specific improvements>] },
-    "engagement_health": { "score": <1-10>, "label": "Engagement Health", "good": [<up to 2 things done well>], "fix": [<up to 3 specific improvements>] },
-    "growth_signals":    { "score": <1-10>, "label": "Growth Signals",    "good": [<up to 2 things done well>], "fix": [<up to 3 specific improvements>] }
+    "algo_fit":     { "score": <1–10>, "label": "Algo Fit",        "good": [<1–2 specific strengths>], "fix": [<2–3 specific data-backed improvements>] },
+    "authenticity": { "score": <1–10>, "label": "Authenticity",    "good": [<1–2 specific strengths>], "fix": [<2–3 specific data-backed improvements>] },
+    "content":      { "score": <1–10>, "label": "Content Quality", "good": [<1–2 specific strengths>], "fix": [<2–3 specific data-backed improvements>] },
+    "growth":       { "score": <1–10>, "label": "Growth Signal",   "good": [<1–2 specific strengths>], "fix": [<2–3 possible growth directions worth exploring, framed as opportunities not obligations>] },
+    "monetization": { "score": <1–10>, "label": "Monetization",    "good": [<1–2 specific strengths>], "fix": [<2–3 possible monetization paths that could fit this account's style, framed as options not requirements>] }
   },
-  "top_actions": [<exactly 3 highest-impact actions, each under 12 words>]
+  "top_actions": [<exactly 3 highest-ROI actions, each under 15 words, data-referenced>],
+  "card": {
+    "style": <cyber|neon|iridescent|glitch|cosmic|analog|minimal|liquid|fire|nature|gold|manga — cyber=crypto/hacker, neon=gaming/EDM, iridescent=NFT/web3, glitch=meme/viral, cosmic=AI/tech/dev, analog=music/film, minimal=writing/essays, liquid=art/design, fire=trading/alpha, nature=eco, gold=elite overall>=8.5 only, manga=anime>,
+    "rarity": <common|uncommon|rare|epic|legendary — legendary=top 1% reach, epic=top 5% strong+growing, rare=solid established, uncommon=decent growing, common=early/low-engagement>,
+    "title": <2–5 word creative archetype e.g. "The Signal Caller", "Chaos Meme Lord", "On-Chain Archaeologist">,
+    "subtitle": <6–10 word footer phrase e.g. "Calling DeFi alpha since 2019 · daily signals">
+  },
+  "report": {
+    "account_type": <"Brand Account" | "KOL/Influencer" | "Creator/Individual">,
+    "weighted_er_pct": <estimated weighted ER as string e.g. "1.24%" or "unknown">,
+    "er_percentile": <e.g. "Top 18% for mid-size creators" — be specific>,
+    "algo_risk_score": <0–100, higher = more suppression risk>,
+    "algo_risk_flags": [<2–4 specific suppression signals observed>],
+    "velocity_insight": <1–2 sentence finding on engagement velocity pattern>,
+    "quick_wins": [<2–3 low-effort experiments worth trying in 1–7 days — frame as "could try X to potentially see Y", not commands>],
+    "strategy_fixes": [<2–3 medium-term directions worth exploring over 14–30 days — frame as possibilities and trade-offs, not mandates>],
+    "long_term": [<2–3 compounding habits that tend to work for accounts like this over 30–90 days — frame as patterns, not rules>],
+    "kpis": [<exactly 3 weekly KPIs to track>],
+    "verdict": <1 sentence executive verdict: core strength + primary risk + overall potential>
+  }
 }`;
 
     const res = await openai.chat.completions.create({
         model: TEXT_MODEL,
         messages: [
-            { role: 'system', content: 'You are an expert social media strategist. Return only valid JSON.' },
-            { role: 'user', content: prompt },
+            { role: 'system', content: SYSTEM },
+            { role: 'user',   content: USER },
         ],
-        temperature: 0.3,
-        max_tokens: 8000,
+        temperature: 0.25,
+        max_tokens: 12000,
         stream: false,
     });
 
     const raw = res.choices?.[0]?.message?.content?.trim() || '';
-    // Strip markdown fences, extract the outermost JSON object
+    // Strip markdown fences
     let cleaned = raw.replace(/^```json?\s*/i, '').replace(/```\s*$/i, '').trim();
-    // Find first { and matching last }
+    // Extract from first { onward
     const start = cleaned.indexOf('{');
-    const end   = cleaned.lastIndexOf('}');
-    if (start !== -1 && end !== -1) cleaned = cleaned.slice(start, end + 1);
-    const parsed = JSON.parse(cleaned);
-    // Fix: if AI put top_actions inside dimensions, hoist it out
+    if (start !== -1) cleaned = cleaned.slice(start);
+    // Attempt parse; if it fails, try closing unclosed braces/brackets
+    let parsed;
+    for (let extra = 0; extra <= 6; extra++) {
+        try {
+            parsed = JSON.parse(cleaned + '}'.repeat(extra));
+            break;
+        } catch (_) {}
+    }
+    if (!parsed) throw new Error('Could not repair AI JSON response');
+    // Hoist top_actions if AI nested it inside dimensions
     if (!parsed.top_actions && parsed.dimensions?.top_actions) {
         parsed.top_actions = parsed.dimensions.top_actions;
         delete parsed.dimensions.top_actions;
+    }
+    if (!parsed.top_actions && parsed.dimensions) {
+        for (const key of Object.keys(parsed.dimensions)) {
+            if (parsed.dimensions[key]?.top_actions) {
+                parsed.top_actions = parsed.dimensions[key].top_actions;
+                delete parsed.dimensions[key].top_actions;
+                break;
+            }
+        }
+    }
+    // Hoist card block if AI nested it inside dimensions
+    if (!parsed.card && parsed.dimensions?.card) {
+        parsed.card = parsed.dimensions.card;
+        delete parsed.dimensions.card;
+    }
+    // Hoist report block if AI nested it inside dimensions
+    if (!parsed.report && parsed.dimensions?.report) {
+        parsed.report = parsed.dimensions.report;
+        delete parsed.dimensions.report;
+    }
+    // Remove any non-dimension keys that leaked into dimensions (no label = not a dimension)
+    if (parsed.dimensions) {
+        for (const key of Object.keys(parsed.dimensions)) {
+            if (!parsed.dimensions[key]?.label) delete parsed.dimensions[key];
+        }
     }
     return parsed;
 }
@@ -210,46 +273,36 @@ async function scrapeProfile(page, uname) {
         const location = getText('[data-testid="UserLocation"]');
         const joinDate  = getText('[data-testid="UserJoinDate"]');
 
-        // Stats — robust multi-strategy extraction
+        // Stats — DOM link approach + text-based fallback
         let followers = null, following = null, tweetCount = null;
         const firstNum = el => {
             if (!el) return null;
             for (const s of Array.from(el.querySelectorAll('span'))) {
                 const t = s.innerText?.trim();
-                if (t && /^[\d,.]+[KkMm]?$/.test(t) && t !== '0' || /^\d+$/.test(t)) return t;
+                if (t && /^[\d,.]+[KkMm]?$/.test(t) && t !== '0') return t;
             }
             return null;
         };
         document.querySelectorAll('a[href*="/followers"]').forEach(a => {
             if (followers) return;
+            const href = a.getAttribute('href') || '';
+            if (href.endsWith('/following')) return;
             const n = firstNum(a);
             if (n) followers = n;
         });
         document.querySelectorAll('a[href*="/following"]').forEach(a => {
             if (following) return;
             const href = a.getAttribute('href') || '';
-            if (href.includes('/followers')) return; // skip verified_followers link
+            if (href.includes('/followers')) return;
             const n = firstNum(a);
             if (n) following = n;
         });
 
-        // tweet count from header or profile stats area
-        const headerText = getText('[data-testid="primaryColumn"] h2');
-        if (headerText) {
-            const m = headerText.match(/([\d,.]+[KkMm]?)\s+[Pp]ost/);
-            if (m) tweetCount = m[1];
-        }
-        if (!tweetCount) {
-            // fallback: look for "posts" text near a number in profile
-            document.querySelectorAll('[data-testid="UserProfileHeader_Items"] span, [data-testid="primaryColumn"] span').forEach(s => {
-                if (tweetCount) return;
-                const t = s.innerText?.trim();
-                if (t && /^[\d,.]+[KkMm]?$/.test(t)) {
-                    const next = s.parentElement?.innerText?.toLowerCase();
-                    if (next && next.includes('post')) tweetCount = t;
-                }
-            });
-        }
+        // Text-based fallback — scan full page text for "N Followers", "N Following", "N Posts"
+        const pageText = document.body.innerText;
+        if (!followers) { const m = pageText.match(/([\d,.]+[KkMm]?)\s+Followers/i); if (m) followers = m[1]; }
+        if (!following) { const m = pageText.match(/([\d,.]+[KkMm]?)\s+Following/i); if (m) following = m[1]; }
+        if (!tweetCount) { const m = pageText.match(/([\d,.]+[KkMm]?)\s+[Pp]osts?(?:\s|$)/); if (m) tweetCount = m[1]; }
 
         // profile pic + banner
         const pfpEl = document.querySelector('a[href$="/photo"] img, [data-testid="UserAvatar-Container"] img');
@@ -333,6 +386,7 @@ function printReport(profile, evaluation) {
     // dimensions
     console.log(`\n  ${C.bold}DIMENSIONS${C.reset}\n`);
     for (const [, dim] of Object.entries(evaluation.dimensions || {})) {
+        if (!dim?.label) continue;  // skip any non-dimension entries that leaked in
         const s = dim.score || 0;
         const color = s >= 7 ? C.green : s >= 5 ? C.yellow : C.red;
         console.log(`  ${C.bold}${dim.label.padEnd(20)}${C.reset} ${bar(s, 16)}  ${color}${s}/10${C.reset}`);
@@ -352,6 +406,27 @@ function printReport(profile, evaluation) {
         evaluation.top_actions.forEach((a, i) => {
             console.log(`  ${C.bold}${C.cyan}${i + 1}.${C.reset} ${a}`);
         });
+    }
+
+    // report section
+    const r = evaluation.report;
+    if (r) {
+        console.log('\n' + line);
+        console.log(`\n  ${C.bold}INTELLIGENCE REPORT${C.reset}  ${C.gray}${r.account_type || ''}${C.reset}\n`);
+        if (r.verdict) console.log(`  ${C.bold}Verdict:${C.reset} ${r.verdict}\n`);
+        if (r.weighted_er_pct) console.log(`  ${C.gray}Weighted ER:${C.reset} ${C.bold}${r.weighted_er_pct}${C.reset}  ${C.gray}${r.er_percentile || ''}${C.reset}`);
+        if (r.algo_risk_score != null) {
+            const riskColor = r.algo_risk_score >= 60 ? C.red : r.algo_risk_score >= 35 ? C.yellow : C.green;
+            console.log(`  ${C.gray}Algo Risk:${C.reset} ${riskColor}${r.algo_risk_score}/100${C.reset}  ${C.dim}${(r.algo_risk_flags || []).join(' · ')}${C.reset}`);
+        }
+        if (r.velocity_insight) console.log(`\n  ${C.dim}${r.velocity_insight}${C.reset}`);
+        if (r.quick_wins?.length) {
+            console.log(`\n  ${C.bold}Quick Wins (1–7 days)${C.reset}`);
+            r.quick_wins.forEach(a => console.log(`    ${C.green}→${C.reset} ${a}`));
+        }
+        if (r.kpis?.length) {
+            console.log(`\n  ${C.bold}Track Weekly:${C.reset} ${r.kpis.join('  ·  ')}`);
+        }
     }
 
     console.log('\n' + C.bold + C.white + '═'.repeat(w) + C.reset + '\n');
