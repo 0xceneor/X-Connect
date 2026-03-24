@@ -59,6 +59,14 @@ function getSftp(conn) {
     console.log('✅ evaluate.php uploaded');
     await upload(sftp, path.join(LOCAL, 'evaluate-queue.php'), `${WEB_ROOT}/evaluate-queue.php`);
     console.log('✅ evaluate-queue.php uploaded');
+    if (fs.existsSync(path.join(LOCAL, 'evaluate-card.php'))) {
+        await upload(sftp, path.join(LOCAL, 'evaluate-card.php'), `${WEB_ROOT}/evaluate-card.php`);
+        console.log('✅ evaluate-card.php uploaded');
+    }
+    if (fs.existsSync(path.join(LOCAL, 'leaderboard.php'))) {
+        await upload(sftp, path.join(LOCAL, 'leaderboard.php'), `${WEB_ROOT}/leaderboard.php`);
+        console.log('✅ leaderboard.php uploaded');
+    }
 
     // 3. read existing .htaccess and merge rules
     let existing = '';

@@ -572,6 +572,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
   <div class="nav-end">
     <a href="/feed" class="nav-a">Feed</a>
     <a href="/evaluate" class="nav-a active">Evaluate</a>
+    <a href="/leaderboard" class="nav-a">Leaderboard</a>
     <a href="https://x.com/aptum_" target="_blank" class="nav-a">@aptum_</a>
   </div>
 </div>

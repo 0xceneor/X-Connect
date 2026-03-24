@@ -10,6 +10,9 @@ RewriteRule ^feed/?$      /feed.php      [L]
 # aptum.fun/evaluate  →  evaluate.php
 RewriteRule ^evaluate/?$  /evaluate.php  [L]
 
+# aptum.fun/leaderboard  →  leaderboard.php
+RewriteRule ^leaderboard/?$  /leaderboard.php  [L]
+
 # Block direct access to data files
 <Files "feed-data.json">
     Require all denied
