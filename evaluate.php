@@ -457,7 +457,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 .pstat:last-child{border-right:none;}
 .pstat-val{font-size:13px;font-weight:700;color:var(--ink);line-height:1;}
 .pstat-lbl{font-size:7.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink4);font-weight:600;}
-.profile-right{text-align:right;flex-shrink:0;padding-top:48px;display:flex;flex-direction:column;align-items:flex-end;gap:5px;}
+.profile-right{text-align:right;flex-shrink:0;padding-top:48px;padding-bottom:4px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;}
 .score-big{font-family:var(--disp);font-size:52px;font-weight:800;line-height:1;letter-spacing:-.02em;}
 .score-grade-lbl{font-size:10px;font-weight:700;letter-spacing:.2em;color:var(--ink4);text-transform:uppercase;}
 .niche-tag{font-size:8px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;padding:3px 10px;border:1px solid var(--bdr2);background:var(--bg3);color:var(--ink3);display:inline-block;margin-top:2px;}
@@ -633,7 +633,7 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
           <div class="score-grade-lbl"><?= htmlspecialchars($ev['grade'] ?? '') ?> · Grade</div>
           <?php if ($ev['niche'] ?? ''): ?><div class="niche-tag"><?= htmlspecialchars($ev['niche']) ?></div><?php endif; ?>
           <?php if ($report['account_type'] ?? ''): ?><div class="niche-tag" style="margin-top:4px;"><?= htmlspecialchars($report['account_type']) ?></div><?php endif; ?>
-          <div style="margin-top:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+          <div style="margin-top:auto;padding-top:14px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
             <button class="dl-btn" id="dl-btn" onclick="downloadCard()">↓ Download Card</button>
             <div class="dl-status" id="dl-status" style="text-align:right;"></div>
           </div>
