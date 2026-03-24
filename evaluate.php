@@ -633,6 +633,10 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
           <div class="score-grade-lbl"><?= htmlspecialchars($ev['grade'] ?? '') ?> · Grade</div>
           <?php if ($ev['niche'] ?? ''): ?><div class="niche-tag"><?= htmlspecialchars($ev['niche']) ?></div><?php endif; ?>
           <?php if ($report['account_type'] ?? ''): ?><div class="niche-tag" style="margin-top:4px;"><?= htmlspecialchars($report['account_type']) ?></div><?php endif; ?>
+          <div style="margin-top:10px;display:flex;flex-direction:column;align-items:flex-end;gap:4px;">
+            <button class="dl-btn" id="dl-btn" onclick="downloadCard()">↓ Download Card</button>
+            <div class="dl-status" id="dl-status" style="text-align:right;"></div>
+          </div>
         </div>
       </div>
     </div>
@@ -847,20 +851,6 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
     <?php endif; ?>
 
     <?php endif; // end $report ?>
-
-    <!-- ── DOWNLOAD ── -->
-    <div class="panel" style="margin-bottom:32px;">
-      <div class="dl-wrap">
-        <div>
-          <div style="font-size:11px;font-weight:600;color:var(--ink2);">Share Card</div>
-          <div style="font-size:9.5px;color:var(--ink4);margin-top:2px;">400×500px · PNG · <?= relTime($evalData['scannedAt'] ?? '') ?> · <?= (int)($evalData['tweetCount'] ?? 0) ?> posts analyzed</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:12px;">
-          <div class="dl-status" id="dl-status"></div>
-          <button class="dl-btn" id="dl-btn" onclick="downloadCard()">↓ Download Card</button>
-        </div>
-      </div>
-    </div>
 
   </div><!-- /eval-wrap -->
 
