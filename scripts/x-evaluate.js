@@ -362,6 +362,23 @@ async function scrapeTweets(page) {
     });
 }
 
+// ── Extract @mentions from tweet texts ───────────────────────────────────────
+function extractMentions(tweets, selfUsername) {
+    const counts = {};
+    const self = selfUsername.toLowerCase();
+    for (const t of tweets) {
+        const mentions = (t.text.match(/@(\w{1,50})/g) || []).map(m => m.slice(1).toLowerCase());
+        for (const m of mentions) {
+            if (m === self) continue;
+            counts[m] = (counts[m] || 0) + 1;
+        }
+    }
+    return Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 15)
+        .map(([handle, count]) => ({ handle, count }));
+}
+
 // ── Print report ─────────────────────────────────────────────────────────────
 function printReport(profile, evaluation) {
     const w = 60;
@@ -508,12 +525,16 @@ async function pushEvaluation(data) {
         // 6. save
         const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
         const outPath = path.join(EVAL_DIR, `${username}-${timestamp}.json`);
+        const topMentions = extractMentions(tweets, username);
+        log(`Top mentions: ${topMentions.slice(0, 5).map(m => `@${m.handle}(${m.count})`).join(', ')}`);
+
         const payload = {
             username,
             profile,
             evaluation,
             tweetCount: tweets.length,
             visualDesc,
+            top_mentions: topMentions,
             scannedAt: new Date().toISOString(),
         };
         fs.writeFileSync(outPath, JSON.stringify(payload, null, 2));

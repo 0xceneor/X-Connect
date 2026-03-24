@@ -25,9 +25,55 @@ else {
             'er_pct'       => $d['evaluation']['report']['weighted_er_pct'] ?? '',
             'verdict'      => $d['evaluation']['report']['verdict'] ?? '',
             'dimensions'   => array_values($d['evaluation']['dimensions'] ?? []),
+            'top_mentions' => $d['top_mentions'] ?? [],
         ];
     }
 }
+
+// Build mention graph across evaluated accounts only
+$evalHandles = array_flip(array_map('strtolower', array_column($evals, 'username')));
+$evalByHandle = [];
+foreach ($evals as $e) $evalByHandle[strtolower($e['username'])] = $e;
+
+// edges[from][to] = mention count
+$edges = [];
+foreach ($evals as $e) {
+    $from = strtolower($e['username']);
+    foreach ($e['top_mentions'] as $m) {
+        $to = strtolower($m['handle'] ?? '');
+        if (!$to || !isset($evalHandles[$to]) || $to === $from) continue;
+        $edges[$from][$to] = ($edges[$from][$to] ?? 0) + ($m['count'] ?? 1);
+    }
+}
+
+// Find mutual pairs (both mention each other) + one-way connections
+$mutualPairs = []; // [a, b, countAtoB, countBtoA]
+$seen = [];
+foreach ($edges as $a => $targets) {
+    foreach ($targets as $b => $cnt) {
+        $key = $a < $b ? "$a|$b" : "$b|$a";
+        if (isset($seen[$key])) continue;
+        $seen[$key] = true;
+        $reverse = $edges[$b][$a] ?? 0;
+        $mutualPairs[] = [
+            'a' => $a, 'b' => $b,
+            'a_to_b' => $cnt, 'b_to_a' => $reverse,
+            'mutual' => $cnt > 0 && $reverse > 0,
+            'strength' => $cnt + $reverse,
+        ];
+    }
+}
+// Sort by strength desc
+usort($mutualPairs, fn($x, $y) => $y['strength'] <=> $x['strength']);
+
+// Most mentioned evaluated accounts (incoming mention count)
+$incomingMentions = [];
+foreach ($edges as $from => $targets) {
+    foreach ($targets as $to => $cnt) {
+        $incomingMentions[$to] = ($incomingMentions[$to] ?? 0) + $cnt;
+    }
+}
+arsort($incomingMentions);
 
 // Sort by score desc
 usort($evals, fn($a, $b) => $b['overall'] <=> $a['overall']);
@@ -220,6 +266,31 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
 
 /* empty */
 .empty{padding:32px 18px;text-align:center;font-size:12px;color:var(--ink4);}
+
+/* ── MUTUALS ── */
+.mutual-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:1px;background:var(--bdr);border:1px solid var(--bdr);}
+.mutual-card{background:var(--bg2);padding:12px 14px;display:flex;align-items:center;gap:12px;transition:background .1s;cursor:pointer;}
+.mutual-card:hover{background:var(--bg3);}
+.mutual-pfps{display:flex;align-items:center;flex-shrink:0;}
+.mutual-pfp{width:30px;height:30px;border-radius:50%;object-fit:cover;border:2px solid var(--bg2);background:var(--bg3);}
+.mutual-pfp:not(:first-child){margin-left:-8px;}
+.mutual-info{flex:1;min-width:0;}
+.mutual-handles{font-size:11px;font-weight:700;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.mutual-arrow{font-size:10px;color:var(--ink4);margin:0 3px;}
+.mutual-badge{font-size:8px;font-weight:700;letter-spacing:.1em;padding:2px 7px;border:1px solid;margin-top:4px;display:inline-block;}
+.mutual-badge.both{color:var(--green);border-color:rgba(11,122,66,0.3);background:var(--green-bg);}
+.mutual-badge.oneway{color:var(--ink4);border-color:var(--bdr2);background:var(--bg3);}
+.mutual-counts{font-size:9px;color:var(--ink4);flex-shrink:0;text-align:right;line-height:1.6;}
+
+.hub-rows{display:flex;flex-direction:column;}
+.hub-row{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--bdr);transition:background .1s;cursor:pointer;}
+.hub-row:last-child{border-bottom:none;}
+.hub-row:hover{background:var(--bg3);}
+.hub-pfp{width:26px;height:26px;border-radius:50%;object-fit:cover;border:1px solid var(--bdr);background:var(--bg3);flex-shrink:0;}
+.hub-handle{font-size:11px;font-weight:700;color:var(--ink);flex:1;}
+.hub-bar-wrap{width:80px;height:4px;background:var(--bdr);}
+.hub-bar{height:100%;background:var(--green);}
+.hub-count{font-size:9.5px;font-weight:700;color:var(--ink3);min-width:28px;text-align:right;}
 </style>
 </head>
 <body>
@@ -391,6 +462,73 @@ body::after{content:'';position:fixed;inset:0;z-index:0;pointer-events:none;
     </div>
     <?php endif; ?>
   </div>
+
+  <!-- ── §04 TOP MUTUALS ── -->
+  <?php if (!empty($mutualPairs) || !empty($incomingMentions)): ?>
+  <div class="panel">
+    <div class="sec-hd">
+      <span class="sec-num">04</span><span class="sec-pipe">|</span>
+      <span class="sec-title">Top Mutuals</span>
+      <span class="sec-sub">Derived from @mention patterns across evaluated accounts</span>
+      <span class="sec-status"><?= count($mutualPairs) ?> connection<?= count($mutualPairs) !== 1 ? 's' : '' ?></span>
+    </div>
+
+    <?php if (!empty($mutualPairs)): ?>
+    <div style="padding:8px 14px;font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink4);font-weight:700;background:var(--bg1);border-bottom:1px solid var(--bdr);">ENGAGEMENT CONNECTIONS</div>
+    <div class="mutual-grid">
+      <?php foreach (array_slice($mutualPairs, 0, 18) as $pair):
+        $ea = $evalByHandle[$pair['a']] ?? null;
+        $eb = $evalByHandle[$pair['b']] ?? null;
+        if (!$ea || !$eb) continue;
+        $isMutual = $pair['mutual'];
+      ?>
+      <div class="mutual-card" onclick="location.href='/evaluate?u=<?= urlencode($ea['username']) ?>'">
+        <div class="mutual-pfps">
+          <img class="mutual-pfp" src="<?= htmlspecialchars($ea['pfpUrl'] ?: 'https://unavatar.io/x/'.urlencode($ea['username'])) ?>"
+               onerror="this.src='https://unavatar.io/x/<?= urlencode($ea['username']) ?>';this.onerror=null" alt="">
+          <img class="mutual-pfp" src="<?= htmlspecialchars($eb['pfpUrl'] ?: 'https://unavatar.io/x/'.urlencode($eb['username'])) ?>"
+               onerror="this.src='https://unavatar.io/x/<?= urlencode($eb['username']) ?>';this.onerror=null" alt="">
+        </div>
+        <div class="mutual-info">
+          <div class="mutual-handles">
+            @<?= htmlspecialchars($ea['username']) ?>
+            <span class="mutual-arrow"><?= $isMutual ? '↔' : '→' ?></span>
+            @<?= htmlspecialchars($eb['username']) ?>
+          </div>
+          <span class="mutual-badge <?= $isMutual ? 'both' : 'oneway' ?>"><?= $isMutual ? 'MUTUAL' : 'ONE-WAY' ?></span>
+        </div>
+        <div class="mutual-counts">
+          <?php if ($pair['a_to_b']): ?><div><?= $pair['a_to_b'] ?>× mention</div><?php endif; ?>
+          <?php if ($pair['b_to_a']): ?><div><?= $pair['b_to_a'] ?>× back</div><?php endif; ?>
+        </div>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+
+    <?php if (!empty($incomingMentions)): ?>
+    <div style="padding:8px 14px;font-size:8px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink4);font-weight:700;background:var(--bg1);border-top:1px solid var(--bdr);border-bottom:1px solid var(--bdr);">MOST REFERENCED WITHIN POOL</div>
+    <?php $maxIncoming = max(array_values($incomingMentions)); ?>
+    <div class="hub-rows">
+      <?php foreach (array_slice($incomingMentions, 0, 8, true) as $handle => $cnt):
+        $he = $evalByHandle[$handle] ?? null;
+        if (!$he) continue;
+        $barW = $maxIncoming > 0 ? round(($cnt / $maxIncoming) * 100) : 0;
+      ?>
+      <div class="hub-row" onclick="location.href='/evaluate?u=<?= urlencode($he['username']) ?>'">
+        <img class="hub-pfp" src="<?= htmlspecialchars($he['pfpUrl'] ?: 'https://unavatar.io/x/'.urlencode($he['username'])) ?>"
+             onerror="this.src='https://unavatar.io/x/<?= urlencode($he['username']) ?>';this.onerror=null" alt="">
+        <span class="hub-handle">@<?= htmlspecialchars($he['username']) ?></span>
+        <span style="font-size:9px;color:var(--ink4);"><?= htmlspecialchars($he['niche']) ?></span>
+        <div class="hub-bar-wrap"><div class="hub-bar" style="width:<?= $barW ?>%"></div></div>
+        <span class="hub-count"><?= $cnt ?>×</span>
+      </div>
+      <?php endforeach; ?>
+    </div>
+    <?php endif; ?>
+
+  </div>
+  <?php endif; ?>
 
   <?php endif; ?>
 
